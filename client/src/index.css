@@ -378,6 +378,9 @@ textarea {
 .blog-editor .ql-editor.ql-blank::before {
   color: #6b7280 !important;
   font-style: normal !important;
+  left: 24px !important;
+  right: 24px !important;
+  top: 24px !important;
 }
 
 .blog-editor .ql-snow .ql-stroke {

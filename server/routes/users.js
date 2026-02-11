@@ -1,10 +1,23 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const pool = require('../config/database');
+const { getUserDetails, getDashboardStats, getRecentActivity, getAdminNotifications, markNotificationsRead } = require('../controllers/userController');
 const router = express.Router();
 
+router.use(authenticateToken, requireAdmin);
+
+// Dashboard aggregate stats
+router.get('/stats', getDashboardStats);
+
+// Recent activity for dashboard
+router.get('/recent-activity', getRecentActivity);
+
+// Admin notifications
+router.get('/notifications', getAdminNotifications);
+router.post('/notifications/read', markNotificationsRead);
+
 // Get all users with search and pagination
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     const offset = (page - 1) * limit;
@@ -49,8 +62,11 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Get user full details (aggregated from multiple tables)
+router.get('/:id/details', getUserDetails);
+
 // Get user by ID
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const [users] = await pool.execute(
       `SELECT id, fullName, email, isVerified, profilePic, 
@@ -70,7 +86,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete user
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const [result] = await pool.execute(
       'DELETE FROM users WHERE id = ?',

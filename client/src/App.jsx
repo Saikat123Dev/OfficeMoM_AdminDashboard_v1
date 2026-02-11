@@ -4,11 +4,15 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
+import UserDetail from './pages/UserDetail';
 import FAQs from './pages/FAQs';
 import Pricing from './pages/Pricing';
 import Blogs from './pages/Blogs';
 import BlogEditor from './pages/BlogEditor';
 import BlogPreview from './pages/BlogPreview';
+import Notifications from './pages/Notifications';
+import ProfileSettings from './pages/ProfileSettings';
+import AccountSettings from './pages/AccountSettings';
 import Layout from './components/Layout';
 import './index.css'
 function ProtectedRoute({ children }) {
@@ -34,6 +38,13 @@ function App() {
               <ProtectedRoute>
                 <Layout>
                   <Users />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/users/:id" element={
+              <ProtectedRoute>
+                <Layout>
+                  <UserDetail />
                 </Layout>
               </ProtectedRoute>
             } />
@@ -76,6 +87,27 @@ function App() {
               <ProtectedRoute>
                 <Layout>
                   <BlogPreview />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/notifications" element={
+              <ProtectedRoute>
+                <Layout>
+                  <Notifications />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/settings/profile" element={
+              <ProtectedRoute>
+                <Layout>
+                  <ProfileSettings />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            <Route path="/settings/account" element={
+              <ProtectedRoute>
+                <Layout>
+                  <AccountSettings />
                 </Layout>
               </ProtectedRoute>
             } />

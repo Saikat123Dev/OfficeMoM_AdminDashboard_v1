@@ -8,6 +8,7 @@ import {
   HelpCircle,
   CreditCard,
   FileText,
+  Bell,
   ChevronRight
 } from 'lucide-react';
 
@@ -17,6 +18,7 @@ const navigation = [
   { name: 'FAQs', href: '/faqs', icon: HelpCircle },
   { name: 'Blog Posts', href: '/blogs', icon: FileText },
   { name: 'Pricing', href: '/pricing', icon: CreditCard },
+  { name: 'Notifications', href: '/notifications', icon: Bell },
 ];
 
 export default function Sidebar({ open, setOpen }) {

@@ -34,6 +34,11 @@ const StatusBadge = ({ status }) => {
   );
 };
 
+const normalizeStatus = (value) => {
+  if (value === true || value === 1 || value === '1' || value === 'true') return 'active';
+  return 'inactive';
+};
+
 /* ========== FAQ Accordion Item ========== */
 
 const FAQAccordionItem = ({ faq, expanded, onToggle, onEdit, onDelete }) => (
@@ -83,7 +88,7 @@ const FAQAccordionItem = ({ faq, expanded, onToggle, onEdit, onDelete }) => (
 
 /* ========== FAQ Form Modal ========== */
 
-const FAQFormModal = ({ formData, setFormData, onSubmit, onClose, isEditing }) => (
+const FAQFormModal = ({ formData, setFormData, onSubmit, onClose, isEditing, categoryOptions, needForOptions, submitting, error }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
     <div className="relative bg-slate-800/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700/50 w-full max-w-lg animate-scale-in">
@@ -99,6 +104,11 @@ const FAQFormModal = ({ formData, setFormData, onSubmit, onClose, isEditing }) =
 
       {/* Form */}
       <div className="p-6 space-y-4">
+        {error && (
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-300">
+            {error}
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-slate-300 mb-1.5">Question</label>
           <input
@@ -121,16 +131,47 @@ const FAQFormModal = ({ formData, setFormData, onSubmit, onClose, isEditing }) =
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1.5">Category</label>
-            <select
+            <input
+              list="faq-category-options"
               value={formData.category}
               onChange={(e) => setFormData({ ...formData, category: e.target.value })}
               className="input-dark"
-            >
-              <option value="General">General</option>
-              <option value="Technical">Technical</option>
-              <option value="Billing">Billing</option>
-              <option value="Account">Account</option>
-            </select>
+              placeholder="e.g. General"
+            />
+            <datalist id="faq-category-options">
+              {categoryOptions.map((category) => (
+                <option key={category} value={category} />
+              ))}
+            </datalist>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Need For</label>
+            <input
+              list="faq-needfor-options"
+              value={formData.need_for}
+              onChange={(e) => setFormData({ ...formData, need_for: e.target.value })}
+              className="input-dark"
+              placeholder="e.g. mainPage"
+            />
+            <datalist id="faq-needfor-options">
+              {needForOptions.map((needFor) => (
+                <option key={needFor} value={needFor} />
+              ))}
+            </datalist>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Display Order</label>
+            <input
+              type="number"
+              min="0"
+              value={formData.display_order}
+              onChange={(e) => setFormData({ ...formData, display_order: e.target.value })}
+              className="input-dark"
+              placeholder="0"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1.5">Status</label>
@@ -148,8 +189,14 @@ const FAQFormModal = ({ formData, setFormData, onSubmit, onClose, isEditing }) =
 
       {/* Actions */}
       <div className="flex items-center justify-end space-x-3 p-6 border-t border-slate-700/40">
-        <button onClick={onClose} className="btn-secondary">Cancel</button>
-        <button onClick={onSubmit} className="btn-gradient">{isEditing ? 'Update FAQ' : 'Add FAQ'}</button>
+        <button onClick={onClose} className="btn-secondary" disabled={submitting}>Cancel</button>
+        <button
+          onClick={onSubmit}
+          disabled={submitting}
+          className="btn-gradient disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {submitting ? 'Saving...' : (isEditing ? 'Update FAQ' : 'Add FAQ')}
+        </button>
       </div>
     </div>
   </div>
@@ -160,16 +207,27 @@ const FAQFormModal = ({ formData, setFormData, onSubmit, onClose, isEditing }) =
 export default function FAQs() {
   const [faqs, setFaqs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [expandedId, setExpandedId] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingFaq, setEditingFaq] = useState(null);
+  const [pageError, setPageError] = useState('');
+  const [modalError, setModalError] = useState('');
   const [formData, setFormData] = useState({
-    question: '', answer: '', category: 'General', status: 'active'
+    question: '',
+    answer: '',
+    category: 'General',
+    need_for: 'mainPage',
+    display_order: 0,
+    status: 'active'
   });
 
-  const categories = ['All', 'General', 'Technical', 'Billing', 'Account'];
+  const defaultCategories = ['General', 'Technical', 'Billing', 'Account'];
+  const defaultNeedForOptions = ['mainPage', 'dashboard', 'help', 'pricing', 'account', 'support'];
+  const categories = ['All', ...new Set([...defaultCategories, ...faqs.map(f => f.category).filter(Boolean)])];
+  const needForOptions = [...new Set([...defaultNeedForOptions, ...faqs.map(f => f.need_for).filter(Boolean)])];
 
   useEffect(() => {
     loadFaqs();
@@ -178,24 +236,45 @@ export default function FAQs() {
   const loadFaqs = async () => {
     try {
       setLoading(true);
+      setPageError('');
       const response = await faqsService.getFaqs();
-      // Map is_active (backend) to status (frontend)
-      const mappedFaqs = response.data.map(f => ({
+      const rawFaqs = Array.isArray(response.data) ? response.data : (response.data?.faqs || []);
+      const mappedFaqs = rawFaqs.map(f => ({
         ...f,
-        status: f.is_active ? 'active' : 'inactive'
+        need_for: f.need_for || 'mainPage',
+        display_order: Number.isFinite(Number(f.display_order)) ? Number(f.display_order) : 0,
+        status: normalizeStatus(f.is_active)
       }));
       setFaqs(mappedFaqs);
     } catch (error) {
       console.error('Error loading FAQs:', error);
+      setPageError(error.response?.data?.error || 'Failed to load FAQs');
     } finally {
       setLoading(false);
     }
   };
 
   const handleSubmit = async () => {
+    const question = formData.question.trim();
+    const answer = formData.answer.trim();
+    const category = formData.category.trim();
+    const needFor = formData.need_for.trim();
+    const displayOrder = Number.isFinite(Number(formData.display_order)) ? Number(formData.display_order) : 0;
+
+    if (!question || !answer || !category) {
+      setModalError('Question, Answer, and Category are required.');
+      return;
+    }
+
     try {
+      setSubmitting(true);
+      setModalError('');
       const payload = {
-        ...formData,
+        question,
+        answer,
+        category,
+        need_for: needFor || 'mainPage',
+        display_order: displayOrder,
         is_active: formData.status === 'active'
       };
 
@@ -206,19 +285,32 @@ export default function FAQs() {
       }
       setShowModal(false);
       setEditingFaq(null);
-      setFormData({ question: '', answer: '', category: 'General', status: 'active' });
-      loadFaqs();
+      setFormData({
+        question: '',
+        answer: '',
+        category: 'General',
+        need_for: 'mainPage',
+        display_order: 0,
+        status: 'active'
+      });
+      await loadFaqs();
     } catch (error) {
       console.error('Error saving FAQ:', error);
+      setModalError(error.response?.data?.error || 'Failed to save FAQ');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleEdit = (faq) => {
     setEditingFaq(faq);
+    setModalError('');
     setFormData({
       question: faq.question,
       answer: faq.answer,
       category: faq.category || 'General',
+      need_for: faq.need_for || 'mainPage',
+      display_order: Number.isFinite(Number(faq.display_order)) ? Number(faq.display_order) : 0,
       status: faq.status || 'active'
     });
     setShowModal(true);
@@ -228,16 +320,25 @@ export default function FAQs() {
     if (window.confirm('Are you sure you want to delete this FAQ?')) {
       try {
         await faqsService.deleteFaq(id);
-        loadFaqs();
+        await loadFaqs();
       } catch (error) {
         console.error('Error deleting FAQ:', error);
+        setPageError(error.response?.data?.error || 'Failed to delete FAQ');
       }
     }
   };
 
   const openNewModal = () => {
     setEditingFaq(null);
-    setFormData({ question: '', answer: '', category: 'General', status: 'active' });
+    setModalError('');
+    setFormData({
+      question: '',
+      answer: '',
+      category: 'General',
+      need_for: 'mainPage',
+      display_order: 0,
+      status: 'active'
+    });
     setShowModal(true);
   };
 
@@ -296,6 +397,10 @@ export default function FAQs() {
         <div className="flex justify-center items-center p-12">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-indigo-500 border-t-transparent" />
         </div>
+      ) : pageError ? (
+        <div className="card-dark p-12 text-center">
+          <p className="text-red-300 text-base font-medium">{pageError}</p>
+        </div>
       ) : filteredFaqs.length === 0 ? (
         <div className="card-dark p-12 text-center">
           <HelpCircle className="h-12 w-12 text-slate-600 mx-auto mb-4" />
@@ -323,8 +428,12 @@ export default function FAQs() {
           formData={formData}
           setFormData={setFormData}
           onSubmit={handleSubmit}
-          onClose={() => { setShowModal(false); setEditingFaq(null); }}
+          onClose={() => { setShowModal(false); setEditingFaq(null); setModalError(''); }}
           isEditing={!!editingFaq}
+          categoryOptions={categories.filter(c => c !== 'All')}
+          needForOptions={needForOptions}
+          submitting={submitting}
+          error={modalError}
         />
       )}
     </div>

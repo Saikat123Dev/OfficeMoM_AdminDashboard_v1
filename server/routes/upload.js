@@ -27,7 +27,15 @@ router.post('/image', (req, res) => {
             const { filename, mimeType } = info;
 
             // Validate file type
-            const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+            const allowedTypes = [
+                'image/jpeg',
+                'image/jpg',
+                'image/pjpeg',
+                'image/png',
+                'image/gif',
+                'image/webp',
+                'image/svg+xml'
+            ];
             if (!allowedTypes.includes(mimeType)) {
                 file.resume(); // Drain the stream
                 return res.status(400).json({

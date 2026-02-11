@@ -138,8 +138,131 @@ function logout(req, res) {
     });
 }
 
+/**
+ * GET /api/auth/me
+ * Return current authenticated admin profile
+ */
+async function getMe(req, res) {
+    try {
+        const admin = await Admin.findById(req.user.id);
+        if (!admin) {
+            return res.status(404).json({
+                success: false,
+                error: 'Admin not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            user: formatAdminResponse(admin)
+        });
+    } catch (error) {
+        console.error('Get profile error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to load admin profile'
+        });
+    }
+}
+
+/**
+ * PUT /api/auth/profile
+ * Update authenticated admin profile (name + email)
+ */
+async function updateProfile(req, res) {
+    try {
+        const { name, email } = req.body;
+        const adminId = req.user.id;
+
+        const existingAdmin = await Admin.findById(adminId);
+        if (!existingAdmin) {
+            return res.status(404).json({
+                success: false,
+                error: 'Admin not found'
+            });
+        }
+
+        const duplicateEmail = await Admin.findByEmailExcludingId(email, adminId);
+        if (duplicateEmail) {
+            return res.status(409).json({
+                success: false,
+                error: 'Email is already in use by another admin'
+            });
+        }
+
+        await Admin.updateProfile(adminId, { name, email });
+        const updatedAdmin = await Admin.findById(adminId);
+
+        const token = generateToken(updatedAdmin);
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            token,
+            user: formatAdminResponse(updatedAdmin)
+        });
+    } catch (error) {
+        console.error('Update profile error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update profile'
+        });
+    }
+}
+
+/**
+ * PUT /api/auth/password
+ * Change authenticated admin password
+ */
+async function updatePassword(req, res) {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const adminId = req.user.id;
+
+        const admin = await Admin.findByIdWithPassword(adminId);
+        if (!admin) {
+            return res.status(404).json({
+                success: false,
+                error: 'Admin not found'
+            });
+        }
+
+        const isCurrentPasswordValid = await Admin.verifyPassword(currentPassword, admin.password_hash);
+        if (!isCurrentPasswordValid) {
+            return res.status(400).json({
+                success: false,
+                error: 'Current password is incorrect'
+            });
+        }
+
+        const isSamePassword = await Admin.verifyPassword(newPassword, admin.password_hash);
+        if (isSamePassword) {
+            return res.status(400).json({
+                success: false,
+                error: 'New password must be different from current password'
+            });
+        }
+
+        const newPasswordHash = await Admin.hashPassword(newPassword);
+        await Admin.updatePassword(adminId, newPasswordHash);
+
+        res.json({
+            success: true,
+            message: 'Password changed successfully'
+        });
+    } catch (error) {
+        console.error('Update password error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to change password'
+        });
+    }
+}
+
 module.exports = {
     login,
     verifyToken,
-    logout
+    logout,
+    getMe,
+    updateProfile,
+    updatePassword
 };

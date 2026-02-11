@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Users, HelpCircle, CreditCard, TrendingUp, Eye, UserPlus, FileText, Settings, ArrowUpRight, Calendar, Clock, Activity } from 'lucide-react';
-import { usersService, faqsService, pricingService } from '../services/api';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  Users, HelpCircle, CreditCard, TrendingUp, Eye, UserPlus, FileText,
+  ArrowUpRight, Calendar, Clock, Activity, DollarSign, Mic, BarChart3
+} from 'lucide-react';
+import { usersService } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 /* ========== Sub-Components ========== */
@@ -12,7 +15,7 @@ const StatCard = ({ title, value, icon: Icon, color, trend, description }) => (
         <p className="text-sm font-medium text-slate-400 mb-1">{title}</p>
         <p className="text-3xl font-bold text-white mb-2">{value}</p>
         {description && <p className="text-xs text-slate-500">{description}</p>}
-        {trend && (
+        {trend != null && (
           <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-2 ${trend > 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
             }`}>
             <TrendingUp className={`h-3 w-3 mr-1 ${trend > 0 ? '' : 'rotate-180'}`} />
@@ -27,19 +30,23 @@ const StatCard = ({ title, value, icon: Icon, color, trend, description }) => (
   </div>
 );
 
-const ActivityItem = ({ icon: Icon, title, time, description, color }) => (
-  <div className="flex items-start space-x-4 p-4 rounded-xl bg-slate-800/20 hover:bg-slate-700/20 transition-colors duration-200 group">
+const ActivityItem = ({ icon: Icon, title, time, description, color, onClick }) => (
+  <div
+    className={`flex items-start space-x-4 p-4 rounded-xl bg-slate-800/20 hover:bg-slate-700/20 transition-colors duration-200 group ${onClick ? 'cursor-pointer' : ''}`}
+    onClick={onClick}
+  >
     <div className={`p-2 rounded-lg ${color} mt-0.5 group-hover:scale-110 transition-transform duration-200`}>
       <Icon className="h-4 w-4 text-white" />
     </div>
     <div className="flex-1 min-w-0">
-      <p className="text-sm font-medium text-white group-hover:text-indigo-300 transition-colors">{title}</p>
-      {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
+      <p className="text-sm font-medium text-white group-hover:text-indigo-300 transition-colors truncate">{title}</p>
+      {description && <p className="text-xs text-slate-500 mt-0.5 truncate">{description}</p>}
       <p className="text-xs text-slate-600 mt-1.5 flex items-center">
         <Clock className="h-3 w-3 mr-1" />
         {time}
       </p>
     </div>
+    {onClick && <ArrowUpRight className="h-4 w-4 text-slate-600 group-hover:text-indigo-400 transition-colors mt-1 flex-shrink-0" />}
   </div>
 );
 
@@ -59,61 +66,96 @@ const QuickAction = ({ icon: Icon, title, description, color, onClick }) => (
   </button>
 );
 
+/* ========== Helpers ========== */
+
+const timeAgo = (dateStr) => {
+  if (!dateStr) return 'Unknown';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+};
+
+const toNumberOrNull = (value) => {
+  if (value == null) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const fmtValue = (value) => {
+  return value == null ? 'N/A' : value;
+};
+
+const fmtCurrency = (amt) => {
+  const amount = toNumberOrNull(amt);
+  if (amount == null) return 'N/A';
+  return `$${(amount / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+};
+
 /* ========== Main Dashboard ========== */
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({
-    totalUsers: 0,
-    totalFaqs: 0,
-    totalPlans: 0,
-    verifiedUsers: 0,
-    activeUsers: 0
-  });
-
+  const [stats, setStats] = useState(null);
+  const [activity, setActivity] = useState({ recentUsers: [], recentMeetings: [], recentPayments: [] });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  useEffect(() => {
-    loadStats();
-  }, []);
-
-  const loadStats = async () => {
+  const loadDashboardData = useCallback(async () => {
+    setLoading(true);
+    setError('');
     try {
-      setLoading(true);
-      const [usersRes, faqsRes, plansRes] = await Promise.all([
-        usersService.getUsers({ limit: 1 }),
-        faqsService.getFaqs(),
-        pricingService.getPlans()
+      const [statsRes, activityRes] = await Promise.all([
+        usersService.getDashboardStats(),
+        usersService.getRecentActivity()
       ]);
 
-      const verifiedUsersCount = usersRes.data.users?.filter(user => user.isVerified)?.length || 0;
+      const s = statsRes.data?.stats;
+      if (!s || typeof s !== 'object') {
+        throw new Error('Invalid dashboard stats response');
+      }
 
       setStats({
-        totalUsers: usersRes.data.pagination?.totalUsers || 0,
-        totalFaqs: faqsRes.data.length,
-        totalPlans: plansRes.data.length,
-        verifiedUsers: verifiedUsersCount,
-        activeUsers: Math.floor((usersRes.data.pagination?.totalUsers || 0) * 0.75)
+        totalUsers: toNumberOrNull(s.totalUsers),
+        verifiedUsers: toNumberOrNull(s.verifiedUsers),
+        totalFaqs: toNumberOrNull(s.totalFaqs),
+        totalPlans: toNumberOrNull(s.totalPlans),
+        totalMeetings: toNumberOrNull(s.totalMeetings),
+        totalPayments: toNumberOrNull(s.totalPayments),
+        totalRevenue: toNumberOrNull(s.totalRevenue),
+        totalMinutesUsed: toNumberOrNull(s.totalMinutesUsed),
+        activeSubscriptions: toNumberOrNull(s.activeSubscriptions)
       });
-    } catch (error) {
-      console.error('Error loading stats:', error);
+
+      const activityData = activityRes.data || {};
+      setActivity({
+        recentUsers: Array.isArray(activityData.recentUsers) ? activityData.recentUsers : [],
+        recentMeetings: Array.isArray(activityData.recentMeetings) ? activityData.recentMeetings : [],
+        recentPayments: Array.isArray(activityData.recentPayments) ? activityData.recentPayments : []
+      });
+    } catch (loadError) {
+      console.error('Error loading dashboard data:', loadError);
+      setError(loadError.response?.data?.error || 'Failed to load dashboard data.');
+      setStats(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const recentActivities = [
-    { icon: UserPlus, title: 'New user registration', description: 'A new user joined the platform', time: '2 minutes ago', color: 'bg-emerald-500/20' },
-    { icon: FileText, title: 'FAQ content updated', description: 'Pricing section modified', time: '1 hour ago', color: 'bg-indigo-500/20' },
-    { icon: Settings, title: 'System maintenance', description: 'Database optimization completed', time: '3 hours ago', color: 'bg-violet-500/20' },
-    { icon: Activity, title: 'Performance improved', description: 'API response time decreased by 15%', time: '5 hours ago', color: 'bg-amber-500/20' }
-  ];
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
 
   const quickActions = [
     { icon: Users, title: 'Manage Users', description: 'View and manage all users', color: 'bg-gradient-to-br from-indigo-500 to-cyan-500', onClick: () => navigate('/users') },
     { icon: HelpCircle, title: 'FAQ System', description: 'Manage help content', color: 'bg-gradient-to-br from-violet-500 to-pink-500', onClick: () => navigate('/faqs') },
     { icon: CreditCard, title: 'Pricing Plans', description: 'Configure subscriptions', color: 'bg-gradient-to-br from-amber-500 to-orange-500', onClick: () => navigate('/pricing') },
-    { icon: TrendingUp, title: 'Blog Posts', description: 'Manage blog content', color: 'bg-gradient-to-br from-emerald-500 to-teal-500', onClick: () => navigate('/blogs') }
+    { icon: FileText, title: 'Blog Posts', description: 'Manage blog content', color: 'bg-gradient-to-br from-emerald-500 to-teal-500', onClick: () => navigate('/blogs') }
   ];
 
   if (loading) {
@@ -123,6 +165,56 @@ export default function Dashboard() {
       </div>
     );
   }
+
+  if (error) {
+    return (
+      <div className="card-dark p-8 text-center">
+        <p className="text-sm text-red-400">{error}</p>
+      </div>
+    );
+  }
+
+  // Build real activity items from data
+  const activityItems = [];
+
+  activity.recentUsers.slice(0, 4).forEach((u) => {
+    activityItems.push({
+      icon: UserPlus,
+      title: `${u.fullName || 'New user'} registered`,
+      description: u.email,
+      time: timeAgo(u.created_at),
+      color: 'bg-emerald-500/20',
+      onClick: () => navigate(`/users/${u.id}`)
+    });
+  });
+
+  activity.recentMeetings.slice(0, 4).forEach((m) => {
+    activityItems.push({
+      icon: Mic,
+      title: m.title || 'Meeting recorded',
+      description: `by ${m.userName || 'Unknown'} (${m.source || 'unknown'})`,
+      time: timeAgo(m.created_at),
+      color: 'bg-indigo-500/20',
+      onClick: null
+    });
+  });
+
+  activity.recentPayments.slice(0, 3).forEach((p) => {
+    activityItems.push({
+      icon: DollarSign,
+      title: `${fmtCurrency(p.amount)} — ${p.plan_name || p.payment_type || 'Payment'}`,
+      description: `by ${p.userName || 'Unknown'}`,
+      time: timeAgo(p.paid_at || p.created_at),
+      color: 'bg-amber-500/20',
+      onClick: null
+    });
+  });
+
+  // Sort by most recent
+  activityItems.sort(() => {
+    // Just keep the interleaved order, it's already recent-first per type
+    return 0;
+  });
 
   return (
     <div className="space-y-8">
@@ -140,28 +232,41 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Stats Grid — 2 rows */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        <StatCard title="Total Users" value={stats.totalUsers} icon={Users} color="from-indigo-500 to-indigo-600" trend={12.5} description="Active platform users" />
-        <StatCard title="Verified Users" value={stats.verifiedUsers} icon={Eye} color="from-emerald-500 to-emerald-600" trend={8.2} description="Email verified accounts" />
-        <StatCard title="FAQs" value={stats.totalFaqs} icon={HelpCircle} color="from-violet-500 to-violet-600" description="Help articles published" />
-        <StatCard title="Pricing Plans" value={stats.totalPlans} icon={CreditCard} color="from-amber-500 to-amber-600" trend={5.7} description="Active subscription plans" />
+        <StatCard title="Total Users" value={fmtValue(stats?.totalUsers)} icon={Users} color="from-indigo-500 to-indigo-600" description={stats?.verifiedUsers == null ? 'Verified users unavailable' : `${stats.verifiedUsers} verified`} />
+        <StatCard title="Total Meetings" value={fmtValue(stats?.totalMeetings)} icon={Mic} color="from-violet-500 to-violet-600" description="Across all users" />
+        <StatCard title="Revenue" value={fmtCurrency(stats?.totalRevenue)} icon={DollarSign} color="from-emerald-500 to-emerald-600" description={stats?.totalPayments == null ? 'Payments unavailable' : `${stats.totalPayments} payments`} />
+        <StatCard title="Active Subs" value={fmtValue(stats?.activeSubscriptions)} icon={BarChart3} color="from-amber-500 to-amber-600" description={stats?.totalMinutesUsed == null ? 'Usage unavailable' : `${stats.totalMinutesUsed} min used`} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <StatCard title="FAQs" value={fmtValue(stats?.totalFaqs)} icon={HelpCircle} color="from-cyan-500 to-cyan-600" description="Help articles published" />
+        <StatCard title="Pricing Plans" value={fmtValue(stats?.totalPlans)} icon={CreditCard} color="from-pink-500 to-pink-600" description="Active subscription plans" />
+        <StatCard title="Verified Users" value={fmtValue(stats?.verifiedUsers)} icon={Eye} color="from-teal-500 to-teal-600" description={stats?.totalUsers == null ? 'Total users unavailable' : `of ${stats.totalUsers} total`} />
+
       </div>
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Recent Activity & Quick Actions */}
+        {/* Recent Activity */}
         <div className="xl:col-span-2 space-y-6">
-          {/* Recent Activity */}
           <div className="card-dark p-6">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-semibold text-white">Recent Activity</h3>
-              <button className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors font-medium">View All</button>
+              <span className="text-xs text-slate-500 px-2.5 py-1 rounded-full bg-slate-800/50 border border-slate-700/30">Live</span>
             </div>
             <div className="space-y-2">
-              {recentActivities.map((activity, index) => (
-                <ActivityItem key={index} {...activity} />
-              ))}
+              {activityItems.length > 0 ? (
+                activityItems.slice(0, 8).map((act, index) => (
+                  <ActivityItem key={index} {...act} />
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <Activity className="h-8 w-8 text-slate-600 mx-auto mb-2" />
+                  <p className="text-sm text-slate-500">No recent activity</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -176,51 +281,59 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* System Status & Performance */}
+        {/* Right Column */}
         <div className="space-y-6">
-          {/* System Status */}
+          {/* Recent Users */}
           <div className="card-dark p-6">
-            <h3 className="text-lg font-semibold text-white mb-5">System Status</h3>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-semibold text-white">New Users</h3>
+              <button onClick={() => navigate('/users')} className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors font-medium">View All</button>
+            </div>
             <div className="space-y-3">
-              {[
-                { name: 'API Server', status: 'operational', response: '45ms' },
-                { name: 'Database', status: 'operational', response: '12ms' },
-                { name: 'File Storage', status: 'degraded', response: '230ms' },
-                { name: 'Email Service', status: 'operational', response: '89ms' }
-              ].map((service, index) => (
-                <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/20">
-                  <div>
-                    <p className="text-sm font-medium text-white">{service.name}</p>
-                    <p className="text-xs text-slate-500">Response: {service.response}</p>
+              {activity.recentUsers.slice(0, 6).map((user) => (
+                <div
+                  key={user.id}
+                  className="flex items-center justify-between p-3 rounded-xl bg-slate-800/20 hover:bg-slate-700/20 transition-colors cursor-pointer group"
+                  onClick={() => navigate(`/users/${user.id}`)}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex-shrink-0 h-9 w-9 bg-gradient-to-br from-indigo-500/20 to-violet-500/20 rounded-xl flex items-center justify-center border border-indigo-500/10">
+                      {user.profilePic ? (
+                        <img className="h-9 w-9 rounded-xl object-cover" src={user.profilePic} alt="" />
+                      ) : (
+                        <span className="text-xs font-bold text-indigo-400">
+                          {(user.fullName || '?')[0].toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white truncate group-hover:text-indigo-300 transition-colors">{user.fullName || 'No Name'}</p>
+                      <p className="text-xs text-slate-500 truncate">{user.email}</p>
+                    </div>
                   </div>
-                  <div className={`px-2.5 py-1 rounded-full text-xs font-medium ${service.status === 'operational'
-                      ? 'bg-emerald-500/15 text-emerald-400'
-                      : 'bg-amber-500/15 text-amber-400'
-                    }`}>
-                    {service.status}
-                  </div>
+                  <span className="text-xs text-slate-600 flex-shrink-0 ml-2">{timeAgo(user.created_at)}</span>
                 </div>
               ))}
+              {activity.recentUsers.length === 0 && (
+                <p className="text-sm text-slate-500 text-center py-4 italic">No users yet</p>
+              )}
             </div>
           </div>
 
-          {/* Performance Metrics */}
+          {/* Platform Stats */}
           <div className="card-dark p-6">
-            <h3 className="text-lg font-semibold text-white mb-5">Performance</h3>
+            <h3 className="text-lg font-semibold text-white mb-5">Platform Health</h3>
             <div className="space-y-4">
               {[
-                { metric: 'Uptime', value: '99.9%', trend: 'positive' },
-                { metric: 'Load Time', value: '1.2s', trend: 'positive' },
-                { metric: 'Error Rate', value: '0.2%', trend: 'neutral' },
-                { metric: 'Active Sessions', value: stats.activeUsers, trend: 'positive' }
+                { metric: 'Total Users', value: fmtValue(stats?.totalUsers) },
+                { metric: 'Active Subscriptions', value: fmtValue(stats?.activeSubscriptions) },
+                { metric: 'Total Revenue', value: fmtCurrency(stats?.totalRevenue) },
+                { metric: 'Total Meetings', value: fmtValue(stats?.totalMeetings) }
               ].map((item, index) => (
                 <div key={index} className="flex items-center justify-between">
                   <span className="text-sm text-slate-400">{item.metric}</span>
                   <div className="flex items-center space-x-2">
                     <span className="text-sm font-medium text-white">{item.value}</span>
-                    {item.trend === 'positive' && (
-                      <TrendingUp className="h-4 w-4 text-emerald-400" />
-                    )}
                   </div>
                 </div>
               ))}

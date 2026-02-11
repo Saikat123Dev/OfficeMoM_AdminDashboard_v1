@@ -1,33 +1,70 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import {
     ArrowLeft, Save, Globe, Image as ImageIcon, X,
-    Upload, Tag, FileText, Eye, Loader2, Check
+    Upload, Tag, FileText, Eye, Loader2, Check, Clock3, Type, ScanText, Trash2
 } from 'lucide-react';
 import { blogService, uploadService } from '../services/api';
 
-const QUILL_MODULES = {
-    toolbar: [
-        [{ header: [1, 2, 3, 4, false] }],
-        ['bold', 'italic', 'underline', 'strike'],
-        [{ color: [] }, { background: [] }],
-        [{ list: 'ordered' }, { list: 'bullet' }],
-        [{ indent: '-1' }, { indent: '+1' }],
-        [{ align: [] }],
-        ['blockquote', 'code-block'],
-        ['link', 'image', 'video'],
-        ['clean']
-    ],
+const QUILL_TOOLBAR = [
+    [{ header: 1 }, { header: 2 }, { header: 3 }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ script: 'sub' }, { script: 'super' }],
+    [{ color: [] }, { background: [] }],
+    [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
+    [{ indent: '-1' }, { indent: '+1' }, { align: [] }],
+    [{ direction: 'rtl' }],
+    ['blockquote', 'code-block'],
+    ['link', 'image', 'video'],
+    ['clean']
+];
+
+const BASE_QUILL_MODULES = {
+    toolbar: QUILL_TOOLBAR,
+    history: {
+        delay: 500,
+        maxStack: 100,
+        userOnly: true
+    },
     clipboard: { matchVisual: false }
 };
 
 const QUILL_FORMATS = [
     'header', 'bold', 'italic', 'underline', 'strike',
-    'color', 'background', 'list', 'indent', 'align',
+    'script', 'color', 'background', 'list', 'indent', 'align', 'direction',
     'blockquote', 'code-block', 'link', 'image', 'video'
 ];
+
+const ALLOWED_IMAGE_TYPES = [
+    'image/jpeg',
+    'image/jpg',
+    'image/pjpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'image/svg+xml'
+];
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+
+const stripHtml = (html = '') => {
+    return html
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
+
+const toAbsoluteImageUrl = (rawUrl) => {
+    if (!rawUrl || typeof rawUrl !== 'string') return '';
+    const url = rawUrl.trim();
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    if (url.startsWith('//')) return `https:${url}`;
+    if (url.startsWith('/')) return `${window.location.origin}${url}`;
+    return `https://${url}`;
+};
 
 export default function BlogEditor() {
     const { id } = useParams();
@@ -48,15 +85,32 @@ export default function BlogEditor() {
     const [saving, setSaving] = useState(false);
     const [publishing, setPublishing] = useState(false);
     const [uploadingImage, setUploadingImage] = useState(false);
+    const [uploadingEditorImage, setUploadingEditorImage] = useState(false);
+    const [dragActive, setDragActive] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
     const [error, setError] = useState('');
 
     const fileInputRef = useRef(null);
+    const editorImageInputRef = useRef(null);
+    const quillRef = useRef(null);
 
     useEffect(() => {
         if (isEditing) loadBlog();
         loadTags();
     }, [id]);
+
+    useEffect(() => {
+        const handleShortcutSave = (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                if (!saving && !publishing) {
+                    handleSave('draft');
+                }
+            }
+        };
+        window.addEventListener('keydown', handleShortcutSave);
+        return () => window.removeEventListener('keydown', handleShortcutSave);
+    }, [saving, publishing, title, content, excerpt, metaDescription, featuredImage, selectedTags, status, id]);
 
     const loadBlog = async () => {
         try {
@@ -82,12 +136,261 @@ export default function BlogEditor() {
         try {
             const res = await blogService.getTags();
             setAvailableTags(res.data.tags || []);
-        } catch { }
+        } catch (err) {
+            console.error('Failed to load tags:', err);
+        }
     };
 
     const showSaveMessage = (msg) => {
         setSaveMessage(msg);
         setTimeout(() => setSaveMessage(''), 3000);
+    };
+
+    const validateImageFile = (file) => {
+        if (!file) return false;
+        if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+            setError('Invalid file type. Please upload JPG, PNG, WEBP, GIF, or SVG.');
+            return false;
+        }
+        if (file.size > MAX_IMAGE_SIZE_BYTES) {
+            setError('Image is too large. Maximum allowed size is 10MB.');
+            return false;
+        }
+        return true;
+    };
+
+    const uploadFeaturedImage = async (file) => {
+        if (!validateImageFile(file)) return;
+        try {
+            setUploadingImage(true);
+            setError('');
+            const res = await uploadService.uploadImage(file);
+            const imageUrl = toAbsoluteImageUrl(res.data?.url);
+            if (!imageUrl) throw new Error('Upload did not return a valid image URL');
+            setFeaturedImage(imageUrl);
+            showSaveMessage('✅ Featured image uploaded');
+        } catch (err) {
+            setError(err.response?.data?.error || 'Image upload failed — please check FTP settings');
+            console.error(err);
+        } finally {
+            setUploadingImage(false);
+        }
+    };
+
+    const uploadEditorImage = useCallback(async (file, insertIndex = null) => {
+        if (!validateImageFile(file)) return;
+        const quill = quillRef.current?.getEditor();
+        if (!quill) return;
+
+        try {
+            setUploadingEditorImage(true);
+            setError('');
+
+            const res = await uploadService.uploadImage(file);
+            const imageUrl = toAbsoluteImageUrl(res.data?.url);
+            if (!imageUrl) throw new Error('Upload failed to return a URL');
+
+            const index = typeof insertIndex === 'number'
+                ? insertIndex
+                : (quill.getSelection(true)?.index ?? quill.getLength());
+
+            quill.insertEmbed(index, 'image', imageUrl, 'user');
+            quill.setSelection(index + 1, 0);
+            // Keep controlled state in sync with direct Quill mutations.
+            setContent(quill.root.innerHTML);
+            showSaveMessage('✅ Editor image uploaded to FTP');
+        } catch (err) {
+            setError(err.response?.data?.error || 'Editor image upload failed');
+            console.error(err);
+        } finally {
+            setUploadingEditorImage(false);
+        }
+    }, []);
+
+    const handleEditorToolbarImage = useCallback(() => {
+        if (uploadingEditorImage) return;
+        editorImageInputRef.current?.click();
+    }, [uploadingEditorImage]);
+
+    const quillModules = useMemo(() => ({
+        ...BASE_QUILL_MODULES,
+        toolbar: {
+            container: QUILL_TOOLBAR,
+            handlers: {
+                image: handleEditorToolbarImage
+            }
+        }
+    }), [handleEditorToolbarImage]);
+
+    useEffect(() => {
+        let canceled = false;
+        let detachListeners = () => { };
+
+        const bindListeners = () => {
+            if (canceled) return;
+            const quill = quillRef.current?.getEditor();
+            if (!quill) {
+                requestAnimationFrame(bindListeners);
+                return;
+            }
+
+            const onPaste = async (event) => {
+                const items = Array.from(event.clipboardData?.items || []);
+                const imageItems = items.filter((item) => item.type?.startsWith('image/'));
+                if (imageItems.length === 0) return;
+
+                event.preventDefault();
+                let index = quill.getSelection(true)?.index ?? quill.getLength();
+
+                for (const item of imageItems) {
+                    const file = item.getAsFile();
+                    if (!file) continue;
+                    await uploadEditorImage(file, index);
+                    index += 1;
+                }
+            };
+
+            const onDrop = async (event) => {
+                const files = Array.from(event.dataTransfer?.files || []);
+                const imageFiles = files.filter((file) => file.type?.startsWith('image/'));
+                if (imageFiles.length === 0) return;
+
+                event.preventDefault();
+                let index = quill.getSelection(true)?.index ?? quill.getLength();
+                for (const file of imageFiles) {
+                    await uploadEditorImage(file, index);
+                    index += 1;
+                }
+            };
+
+            quill.root.addEventListener('paste', onPaste);
+            quill.root.addEventListener('drop', onDrop);
+            detachListeners = () => {
+                quill.root.removeEventListener('paste', onPaste);
+                quill.root.removeEventListener('drop', onDrop);
+            };
+        };
+
+        bindListeners();
+
+        return () => {
+            canceled = true;
+            detachListeners();
+        };
+    }, [uploadEditorImage]);
+
+    const replaceEmbeddedImagesWithUploads = async (htmlContent) => {
+        if (!htmlContent || !htmlContent.includes('data:image/')) {
+            return htmlContent;
+        }
+
+        const dataUrlMatches = Array.from(
+            htmlContent.matchAll(/src=(["'])(data:image\/[^"']+)\1/gi)
+        ).map((match) => match[2]);
+        const uniqueDataUrls = [...new Set(dataUrlMatches)];
+
+        if (uniqueDataUrls.length === 0) return htmlContent;
+
+        let updatedContent = htmlContent;
+        try {
+            setUploadingEditorImage(true);
+            setError('');
+
+            for (let i = 0; i < uniqueDataUrls.length; i += 1) {
+                const dataUrl = uniqueDataUrls[i];
+                const blobResponse = await fetch(dataUrl);
+                const blob = await blobResponse.blob();
+                const extension = (blob.type?.split('/')[1] || 'png').split('+')[0];
+                const file = new File([blob], `inline-${Date.now()}-${i}.${extension}`, {
+                    type: blob.type || 'image/png'
+                });
+
+                if (!validateImageFile(file)) {
+                    throw new Error('Invalid embedded image file');
+                }
+
+                const uploadRes = await uploadService.uploadImage(file);
+                const uploadedUrl = uploadRes.data?.url;
+                if (!uploadedUrl) {
+                    throw new Error('Embedded image upload did not return a URL');
+                }
+
+                updatedContent = updatedContent.split(dataUrl).join(uploadedUrl);
+            }
+        } finally {
+            setUploadingEditorImage(false);
+        }
+
+        showSaveMessage('✅ Embedded images uploaded to FTP');
+        return updatedContent;
+    };
+
+    const handleEditorImageInputChange = async (e) => {
+        const file = e.target.files?.[0];
+        const quill = quillRef.current?.getEditor();
+        const index = quill?.getSelection(true)?.index ?? quill?.getLength() ?? 0;
+        if (file) {
+            await uploadEditorImage(file, index);
+        }
+        e.target.value = '';
+    };
+
+    const findSelectedImageIndex = (quill) => {
+        const selection = quill.getSelection(true);
+        if (!selection) return -1;
+
+        const candidateIndexes = [selection.index, Math.max(0, selection.index - 1)];
+        for (const idx of candidateIndexes) {
+            const [leaf] = quill.getLeaf(idx);
+            if (!leaf) continue;
+            const blotName = leaf.statics?.blotName;
+            const tagName = leaf.domNode?.tagName?.toLowerCase();
+            if (blotName === 'image' || tagName === 'img') {
+                return idx;
+            }
+        }
+        return -1;
+    };
+
+    const handleRemoveSelectedEditorImage = () => {
+        const quill = quillRef.current?.getEditor();
+        if (!quill) return;
+
+        const imageIndex = findSelectedImageIndex(quill);
+        if (imageIndex < 0) {
+            setError('Select an image in the editor first, then click Remove image.');
+            return;
+        }
+
+        quill.deleteText(imageIndex, 1, 'user');
+        setContent(quill.root.innerHTML);
+        showSaveMessage('✅ Selected image removed');
+    };
+
+    const handleImageUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        await uploadFeaturedImage(file);
+        e.target.value = '';
+    };
+
+    const handleDropImage = async (e) => {
+        e.preventDefault();
+        setDragActive(false);
+        if (uploadingImage) return;
+        const file = e.dataTransfer?.files?.[0];
+        if (!file) return;
+        await uploadFeaturedImage(file);
+    };
+
+    const handleDragOverImage = (e) => {
+        e.preventDefault();
+        if (!uploadingImage) setDragActive(true);
+    };
+
+    const handleDragLeaveImage = (e) => {
+        e.preventDefault();
+        setDragActive(false);
     };
 
     const handleSave = async (publishStatus = null) => {
@@ -102,10 +405,20 @@ export default function BlogEditor() {
             else setSaving(true);
             setError('');
 
+            let finalContent = content;
+            if (finalContent.includes('data:image/')) {
+                finalContent = await replaceEmbeddedImagesWithUploads(finalContent);
+                setContent(finalContent);
+            }
+
             const payload = {
-                title: title.trim(), content, excerpt: excerpt.trim(),
-                featured_image: featuredImage, status: finalStatus,
-                meta_description: metaDescription.trim(), tags: selectedTags
+                title: title.trim(),
+                content: finalContent,
+                excerpt: excerpt.trim(),
+                featured_image: featuredImage,
+                status: finalStatus,
+                meta_description: metaDescription.trim(),
+                tags: selectedTags
             };
 
             let res;
@@ -127,22 +440,6 @@ export default function BlogEditor() {
         } finally {
             setSaving(false);
             setPublishing(false);
-        }
-    };
-
-    const handleImageUpload = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        try {
-            setUploadingImage(true);
-            setError('');
-            const res = await uploadService.uploadImage(file);
-            setFeaturedImage(res.data.url);
-        } catch (err) {
-            setError('Image upload failed — please check FTP settings');
-            console.error(err);
-        } finally {
-            setUploadingImage(false);
         }
     };
 
@@ -169,6 +466,14 @@ export default function BlogEditor() {
             !selectedTags.includes(t.name)
         )
         : [];
+
+    const plainTextContent = useMemo(() => stripHtml(content), [content]);
+    const wordCount = useMemo(() => (plainTextContent ? plainTextContent.split(' ').length : 0), [plainTextContent]);
+    const charCount = useMemo(() => plainTextContent.length, [plainTextContent]);
+    const estimatedReadMinutes = useMemo(() => {
+        if (!wordCount) return 0;
+        return Math.max(1, Math.ceil(wordCount / 200));
+    }, [wordCount]);
 
     if (loading) {
         return (
@@ -240,7 +545,6 @@ export default function BlogEditor() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Main Editor — 2 cols */}
                 <div className="lg:col-span-2 space-y-6">
-                    {/* Title */}
                     <div className="card-dark p-6">
                         <input
                             type="text"
@@ -251,22 +555,64 @@ export default function BlogEditor() {
                         />
                     </div>
 
-                    {/* Rich Editor */}
                     <div className="card-dark overflow-hidden blog-editor">
                         <ReactQuill
+                            ref={quillRef}
                             value={content}
                             onChange={setContent}
-                            modules={QUILL_MODULES}
+                            modules={quillModules}
                             formats={QUILL_FORMATS}
                             placeholder="Start writing your blog post..."
                             theme="snow"
                         />
+                        <input
+                            ref={editorImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleEditorImageInputChange}
+                            className="hidden"
+                        />
+                    </div>
+
+                    <div className="card-dark p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/50 border border-slate-700/50 text-slate-300">
+                                    <Type className="h-3.5 w-3.5 text-indigo-400" />
+                                    {wordCount} words
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/50 border border-slate-700/50 text-slate-300">
+                                    <ScanText className="h-3.5 w-3.5 text-violet-400" />
+                                    {charCount} chars
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/50 border border-slate-700/50 text-slate-300">
+                                    <Clock3 className="h-3.5 w-3.5 text-emerald-400" />
+                                    {estimatedReadMinutes} min read
+                                </span>
+                                {uploadingEditorImage && (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        Uploading editor image...
+                                    </span>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={handleRemoveSelectedEditorImage}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors"
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Remove image
+                                </button>
+                            </div>
+                            <span className="text-[11px] text-slate-500">
+                                `Ctrl/Cmd + S` to save draft
+                            </span>
+                        </div>
                     </div>
                 </div>
 
-                {/* Sidebar — 1 col */}
+                {/* Sidebar */}
                 <div className="space-y-6">
-                    {/* Status indicator */}
                     <div className="card-dark p-4">
                         <div className="flex items-center justify-between">
                             <span className="text-sm text-slate-400">Status</span>
@@ -279,14 +625,13 @@ export default function BlogEditor() {
                         </div>
                     </div>
 
-                    {/* Featured Image */}
                     <div className="card-dark p-4 space-y-3">
                         <h3 className="text-sm font-semibold text-white flex items-center">
                             <ImageIcon className="h-4 w-4 mr-2 text-indigo-400" />
                             Featured Image
                         </h3>
 
-                        {featuredImage ? (
+                        {featuredImage && (
                             <div className="relative rounded-lg overflow-hidden">
                                 <img src={featuredImage} alt="Featured" className="w-full h-40 object-cover rounded-lg" />
                                 <button
@@ -296,25 +641,34 @@ export default function BlogEditor() {
                                     <X className="h-3 w-3 text-white" />
                                 </button>
                             </div>
-                        ) : (
-                            <div
-                                onClick={() => fileInputRef.current?.click()}
-                                className="border-2 border-dashed border-slate-600/50 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all"
-                            >
-                                {uploadingImage ? (
-                                    <div className="flex flex-col items-center">
-                                        <Loader2 className="h-8 w-8 text-indigo-400 animate-spin mb-2" />
-                                        <span className="text-sm text-slate-400">Uploading...</span>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <Upload className="h-8 w-8 text-slate-500 mx-auto mb-2" />
-                                        <p className="text-sm text-slate-400">Click to upload</p>
-                                        <p className="text-xs text-slate-500 mt-1">JPG, PNG, WebP (max 10MB)</p>
-                                    </>
-                                )}
-                            </div>
                         )}
+
+                        <div
+                            onClick={() => !uploadingImage && fileInputRef.current?.click()}
+                            onDrop={handleDropImage}
+                            onDragOver={handleDragOverImage}
+                            onDragLeave={handleDragLeaveImage}
+                            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                                dragActive
+                                    ? 'border-indigo-500 bg-indigo-500/10'
+                                    : 'border-slate-600/50 hover:border-indigo-500/50 hover:bg-indigo-500/5'
+                            } ${uploadingImage ? 'opacity-70 cursor-wait' : ''}`}
+                        >
+                            {uploadingImage ? (
+                                <div className="flex flex-col items-center">
+                                    <Loader2 className="h-8 w-8 text-indigo-400 animate-spin mb-2" />
+                                    <span className="text-sm text-slate-400">Uploading...</span>
+                                </div>
+                            ) : (
+                                <>
+                                    <Upload className={`h-8 w-8 mx-auto mb-2 ${dragActive ? 'text-indigo-400' : 'text-slate-500'}`} />
+                                    <p className="text-sm text-slate-300">
+                                        {dragActive ? 'Drop image to upload' : featuredImage ? 'Drop or click to replace image' : 'Click or drop image to upload'}
+                                    </p>
+                                    <p className="text-xs text-slate-500 mt-1">JPG, PNG, WEBP, GIF, SVG (max 10MB)</p>
+                                </>
+                            )}
+                        </div>
 
                         <input
                             ref={fileInputRef}
@@ -333,7 +687,6 @@ export default function BlogEditor() {
                         />
                     </div>
 
-                    {/* Tags */}
                     <div className="card-dark p-4 space-y-3">
                         <h3 className="text-sm font-semibold text-white flex items-center">
                             <Tag className="h-4 w-4 mr-2 text-violet-400" />
@@ -379,7 +732,6 @@ export default function BlogEditor() {
                         </div>
                     </div>
 
-                    {/* Excerpt */}
                     <div className="card-dark p-4 space-y-3">
                         <h3 className="text-sm font-semibold text-white flex items-center">
                             <FileText className="h-4 w-4 mr-2 text-emerald-400" />
@@ -394,7 +746,6 @@ export default function BlogEditor() {
                         />
                     </div>
 
-                    {/* Meta Description */}
                     <div className="card-dark p-4 space-y-3">
                         <h3 className="text-sm font-semibold text-white flex items-center">
                             <Globe className="h-4 w-4 mr-2 text-amber-400" />

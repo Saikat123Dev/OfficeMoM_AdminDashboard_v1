@@ -32,6 +32,9 @@ export const authService = {
   login: (email, password) => api.post('/auth/login', { email, password }),
   verifyToken: () => api.post('/auth/verify'),
   logout: () => api.post('/auth/logout'),
+  getMe: () => api.get('/auth/me'),
+  updateProfile: (data) => api.put('/auth/profile', data),
+  updatePassword: (data) => api.put('/auth/password', data),
   setToken: (token) => {
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -44,7 +47,13 @@ export const authService = {
 export const usersService = {
   getUsers: (params) => api.get('/users', { params }),
   getUser: (id) => api.get(`/users/${id}`),
-  deleteUser: (id) => api.delete(`/users/${id}`)
+  getUserDetails: (id) => api.get(`/users/${id}/details`),
+  deleteUser: (id) => api.delete(`/users/${id}`),
+  getDashboardStats: () => api.get('/users/stats'),
+  getRecentActivity: () => api.get('/users/recent-activity'),
+  getNotifications: (params) => api.get('/users/notifications', { params }),
+  markNotificationsRead: (data) => api.post('/users/notifications/read', data),
+  markAllNotificationsRead: () => api.post('/users/notifications/read', { all: true })
 };
 
 export const faqsService = {

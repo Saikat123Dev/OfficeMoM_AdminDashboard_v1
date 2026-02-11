@@ -55,6 +55,24 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
+  const updateUser = (nextUser) => {
+    setUser(nextUser);
+    if (nextUser) {
+      localStorage.setItem('admin_user', JSON.stringify(nextUser));
+    } else {
+      localStorage.removeItem('admin_user');
+    }
+  };
+
+  const setAuthToken = (token) => {
+    if (token) {
+      localStorage.setItem('admin_token', token);
+    } else {
+      localStorage.removeItem('admin_token');
+    }
+    authService.setToken(token || null);
+  };
+
   const login = async (email, password) => {
     try {
       const response = await authService.login(email, password);
@@ -88,7 +106,9 @@ export function AuthProvider({ children }) {
     user,
     login,
     logout,
-    loading
+    loading,
+    updateUser,
+    setAuthToken
   };
 
   return (

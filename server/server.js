@@ -37,7 +37,8 @@ app.use((req, res, next) => {
   next();
 });// ✅ allow all preflight requests
 
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
 // Test database connection
 app.get('/api/test-db', async (req, res) => {
