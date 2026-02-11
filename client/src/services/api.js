@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'https://api.quantumhash.quantumedu.in/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -30,6 +30,11 @@ api.interceptors.response.use(
 
 export const authService = {
   login: (email, password) => api.post('/auth/login', { email, password }),
+  verifyToken: () => api.post('/auth/verify'),
+  logout: () => api.post('/auth/logout'),
+  getMe: () => api.get('/auth/me'),
+  updateProfile: (data) => api.put('/auth/profile', data),
+  updatePassword: (data) => api.put('/auth/password', data),
   setToken: (token) => {
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -42,7 +47,13 @@ export const authService = {
 export const usersService = {
   getUsers: (params) => api.get('/users', { params }),
   getUser: (id) => api.get(`/users/${id}`),
-  deleteUser: (id) => api.delete(`/users/${id}`)
+  getUserDetails: (id) => api.get(`/users/${id}/details`),
+  deleteUser: (id) => api.delete(`/users/${id}`),
+  getDashboardStats: () => api.get('/users/stats'),
+  getRecentActivity: () => api.get('/users/recent-activity'),
+  getNotifications: (params) => api.get('/users/notifications', { params }),
+  markNotificationsRead: (data) => api.post('/users/notifications/read', data),
+  markAllNotificationsRead: () => api.post('/users/notifications/read', { all: true })
 };
 
 export const faqsService = {
@@ -57,6 +68,28 @@ export const pricingService = {
   createPlan: (data) => api.post('/pricing', data),
   updatePlan: (id, data) => api.put(`/pricing/${id}`, data),
   deletePlan: (id) => api.delete(`/pricing/${id}`)
+};
+
+export const blogService = {
+  getBlogs: (params) => api.get('/blogs', { params }),
+  getBlog: (id) => api.get(`/blogs/${id}`),
+  createBlog: (data) => api.post('/blogs', data),
+  updateBlog: (id, data) => api.put(`/blogs/${id}`, data),
+  deleteBlog: (id) => api.delete(`/blogs/${id}`),
+  updateStatus: (id, status) => api.patch(`/blogs/${id}/status`, { status }),
+  getTags: () => api.get('/blogs/tags'),
+  getCounts: () => api.get('/blogs/counts'),
+};
+
+export const uploadService = {
+  uploadImage: (file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/upload/image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000, // 2 min timeout for uploads
+    });
+  }
 };
 
 export default api;

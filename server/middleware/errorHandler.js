@@ -68,6 +68,14 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  if (err.type === 'entity.too.large' || err.name === 'PayloadTooLargeError') {
+    return res.status(413).json({
+      success: false,
+      error: 'Request payload too large',
+      details: 'Please reduce content size (for example, use uploaded image URLs instead of embedded base64 images)'
+    });
+  }
+
   // Default to 500 server error
   const errorResponse = {
     success: false,

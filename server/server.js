@@ -4,7 +4,7 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
- 
+
 // Import database configuration
 const pool = require('./config/database');
 
@@ -13,7 +13,10 @@ const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 const faqsRoutes = require('./routes/faqs');
 const pricingRoutes = require('./routes/pricing');
- 
+const blogsRoutes = require('./routes/blogs');
+const uploadRoutes = require('./routes/upload');
+const errorHandler = require('./middleware/errorHandler');
+
 // Middleware
 
 
@@ -34,7 +37,8 @@ app.use((req, res, next) => {
   next();
 });// ✅ allow all preflight requests
 
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
 // Test database connection
 app.get('/api/test-db', async (req, res) => {
@@ -55,14 +59,16 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/faqs', faqsRoutes);
 app.use('/api/pricing', pricingRoutes);
+app.use('/api/blogs', blogsRoutes);
+app.use('/api/upload', uploadRoutes);
 
 
 // Basic health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Server is running', 
-    timestamp: new Date().toISOString() 
+  res.json({
+    status: 'OK',
+    message: 'Server is running',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -73,8 +79,8 @@ app.use('/api/:any', (req, res) => {
 
 // Root endpoint
 app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Quiz App API Server', 
+  res.json({
+    message: 'Quiz App API Server',
     version: '1.0.0',
     endpoints: {
       health: '/api/health',
@@ -85,10 +91,8 @@ app.get('/', (req, res) => {
 });
 
 // Error handling middleware
-app.use((error, req, res, next) => {
-  console.error('Server error:', error);
-  res.status(500).json({ error: 'Internal server error' });
-});
+app.use(errorHandler);
+
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
