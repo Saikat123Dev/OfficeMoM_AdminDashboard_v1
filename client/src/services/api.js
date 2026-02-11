@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'https://api.quantumhash.quantumedu.in/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -30,6 +30,8 @@ api.interceptors.response.use(
 
 export const authService = {
   login: (email, password) => api.post('/auth/login', { email, password }),
+  verifyToken: () => api.post('/auth/verify'),
+  logout: () => api.post('/auth/logout'),
   setToken: (token) => {
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
