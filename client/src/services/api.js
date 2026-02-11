@@ -61,4 +61,26 @@ export const pricingService = {
   deletePlan: (id) => api.delete(`/pricing/${id}`)
 };
 
+export const blogService = {
+  getBlogs: (params) => api.get('/blogs', { params }),
+  getBlog: (id) => api.get(`/blogs/${id}`),
+  createBlog: (data) => api.post('/blogs', data),
+  updateBlog: (id, data) => api.put(`/blogs/${id}`, data),
+  deleteBlog: (id) => api.delete(`/blogs/${id}`),
+  updateStatus: (id, status) => api.patch(`/blogs/${id}/status`, { status }),
+  getTags: () => api.get('/blogs/tags'),
+  getCounts: () => api.get('/blogs/counts'),
+};
+
+export const uploadService = {
+  uploadImage: (file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/upload/image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000, // 2 min timeout for uploads
+    });
+  }
+};
+
 export default api;

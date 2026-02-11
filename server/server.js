@@ -13,6 +13,8 @@ const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 const faqsRoutes = require('./routes/faqs');
 const pricingRoutes = require('./routes/pricing');
+const blogsRoutes = require('./routes/blogs');
+const uploadRoutes = require('./routes/upload');
 const errorHandler = require('./middleware/errorHandler');
 
 // Middleware
@@ -56,6 +58,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/faqs', faqsRoutes);
 app.use('/api/pricing', pricingRoutes);
+app.use('/api/blogs', blogsRoutes);
+app.use('/api/upload', uploadRoutes);
 
 
 // Basic health check endpoint

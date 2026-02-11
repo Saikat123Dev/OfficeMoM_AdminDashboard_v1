@@ -1,30 +1,190 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Edit, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, ChevronDown, ChevronUp, HelpCircle, X, Tag, CheckCircle, AlertCircle } from 'lucide-react';
 import { faqsService } from '../services/api';
+
+/* ========== Sub-Components ========== */
+
+const CategoryBadge = ({ category }) => {
+  const colors = {
+    General: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/20',
+    Technical: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20',
+    Billing: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
+    Account: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+    default: 'bg-slate-700/50 text-slate-400 border-slate-600/30'
+  };
+
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${colors[category] || colors.default}`}>
+      <Tag className="w-3 h-3 mr-1.5" />
+      {category}
+    </span>
+  );
+};
+
+const StatusBadge = ({ status }) => {
+  const isActive = status === 'active';
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${isActive
+      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
+      : 'bg-slate-700/50 text-slate-400 border-slate-600/30'
+      }`}>
+      {isActive ? <CheckCircle className="w-3 h-3 mr-1.5" /> : <AlertCircle className="w-3 h-3 mr-1.5" />}
+      {isActive ? 'Active' : 'Inactive'}
+    </span>
+  );
+};
+
+/* ========== FAQ Accordion Item ========== */
+
+const FAQAccordionItem = ({ faq, expanded, onToggle, onEdit, onDelete }) => (
+  <div className={`rounded-xl border transition-all duration-200 ${expanded ? 'bg-slate-800/40 border-indigo-500/30 shadow-lg shadow-indigo-500/5' : 'bg-slate-800/20 border-slate-700/40 hover:border-slate-600/50'
+    }`}>
+    <button
+      onClick={onToggle}
+      className="w-full flex items-center justify-between px-5 py-4 text-left"
+    >
+      <div className="flex-1 pr-4">
+        <h3 className={`text-sm font-medium ${expanded ? 'text-indigo-300' : 'text-white'} transition-colors`}>
+          {faq.question}
+        </h3>
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          <CategoryBadge category={faq.category} />
+          <StatusBadge status={faq.status} />
+        </div>
+      </div>
+      <div className={`p-1 rounded-lg transition-all duration-200 ${expanded ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-500'}`}>
+        {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+      </div>
+    </button>
+
+    {expanded && (
+      <div className="px-5 pb-4 animate-fade-in">
+        <div className="pt-3 border-t border-slate-700/40">
+          <p className="text-sm text-slate-300 leading-relaxed">{faq.answer}</p>
+          <div className="flex items-center space-x-2 mt-4">
+            <button
+              onClick={() => onEdit(faq)}
+              className="flex items-center px-3 py-1.5 text-xs font-medium text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 rounded-lg hover:bg-indigo-500/20 transition-colors"
+            >
+              <Edit className="h-3 w-3 mr-1.5" /> Edit
+            </button>
+            <button
+              onClick={() => onDelete(faq.id)}
+              className="flex items-center px-3 py-1.5 text-xs font-medium text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors"
+            >
+              <Trash2 className="h-3 w-3 mr-1.5" /> Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+);
+
+/* ========== FAQ Form Modal ========== */
+
+const FAQFormModal = ({ formData, setFormData, onSubmit, onClose, isEditing }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+    <div className="relative bg-slate-800/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700/50 w-full max-w-lg animate-scale-in">
+      {/* Header */}
+      <div className="flex items-center justify-between p-6 border-b border-slate-700/40">
+        <h2 className="text-lg font-semibold text-white">
+          {isEditing ? 'Edit FAQ' : 'Add New FAQ'}
+        </h2>
+        <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* Form */}
+      <div className="p-6 space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-300 mb-1.5">Question</label>
+          <input
+            type="text"
+            value={formData.question}
+            onChange={(e) => setFormData({ ...formData, question: e.target.value })}
+            className="input-dark"
+            placeholder="Enter the question..."
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-300 mb-1.5">Answer</label>
+          <textarea
+            value={formData.answer}
+            onChange={(e) => setFormData({ ...formData, answer: e.target.value })}
+            className="input-dark min-h-[120px] resize-y"
+            placeholder="Enter the answer..."
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Category</label>
+            <select
+              value={formData.category}
+              onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+              className="input-dark"
+            >
+              <option value="General">General</option>
+              <option value="Technical">Technical</option>
+              <option value="Billing">Billing</option>
+              <option value="Account">Account</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Status</label>
+            <select
+              value={formData.status}
+              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+              className="input-dark"
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center justify-end space-x-3 p-6 border-t border-slate-700/40">
+        <button onClick={onClose} className="btn-secondary">Cancel</button>
+        <button onClick={onSubmit} className="btn-gradient">{isEditing ? 'Update FAQ' : 'Add FAQ'}</button>
+      </div>
+    </div>
+  </div>
+);
+
+/* ========== Main FAQs Component ========== */
 
 export default function FAQs() {
   const [faqs, setFaqs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
-  const [expandedFaq, setExpandedFaq] = useState(null);
-  const [showForm, setShowForm] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [expandedId, setExpandedId] = useState(null);
+  const [showModal, setShowModal] = useState(false);
   const [editingFaq, setEditingFaq] = useState(null);
+  const [formData, setFormData] = useState({
+    question: '', answer: '', category: 'General', status: 'active'
+  });
 
-  const categories = ['General', 'Billing', 'Technical', 'Account', 'Features'];
+  const categories = ['All', 'General', 'Technical', 'Billing', 'Account'];
 
   useEffect(() => {
     loadFaqs();
-  }, [selectedCategory, search]);
+  }, []);
 
   const loadFaqs = async () => {
     try {
       setLoading(true);
-      const response = await faqsService.getFaqs({
-        category: selectedCategory || undefined,
-        search: search || undefined
-      });
-      setFaqs(response.data);
+      const response = await faqsService.getFaqs();
+      // Map is_active (backend) to status (frontend)
+      const mappedFaqs = response.data.map(f => ({
+        ...f,
+        status: f.is_active ? 'active' : 'inactive'
+      }));
+      setFaqs(mappedFaqs);
     } catch (error) {
       console.error('Error loading FAQs:', error);
     } finally {
@@ -32,10 +192,42 @@ export default function FAQs() {
     }
   };
 
-  const handleDelete = async (faqId) => {
+  const handleSubmit = async () => {
+    try {
+      const payload = {
+        ...formData,
+        is_active: formData.status === 'active'
+      };
+
+      if (editingFaq) {
+        await faqsService.updateFaq(editingFaq.id, payload);
+      } else {
+        await faqsService.createFaq(payload);
+      }
+      setShowModal(false);
+      setEditingFaq(null);
+      setFormData({ question: '', answer: '', category: 'General', status: 'active' });
+      loadFaqs();
+    } catch (error) {
+      console.error('Error saving FAQ:', error);
+    }
+  };
+
+  const handleEdit = (faq) => {
+    setEditingFaq(faq);
+    setFormData({
+      question: faq.question,
+      answer: faq.answer,
+      category: faq.category || 'General',
+      status: faq.status || 'active'
+    });
+    setShowModal(true);
+  };
+
+  const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this FAQ?')) {
       try {
-        await faqsService.deleteFaq(faqId);
+        await faqsService.deleteFaq(id);
         loadFaqs();
       } catch (error) {
         console.error('Error deleting FAQ:', error);
@@ -43,289 +235,98 @@ export default function FAQs() {
     }
   };
 
-  const handleSubmit = async (formData) => {
-    try {
-      if (editingFaq) {
-        await faqsService.updateFaq(editingFaq.id, formData);
-      } else {
-        await faqsService.createFaq(formData);
-      }
-      setShowForm(false);
-      setEditingFaq(null);
-      loadFaqs();
-    } catch (error) {
-      console.error('Error saving FAQ:', error);
-    }
+  const openNewModal = () => {
+    setEditingFaq(null);
+    setFormData({ question: '', answer: '', category: 'General', status: 'active' });
+    setShowModal(true);
   };
 
-  const StatusBadge = ({ active }) => (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-      active 
-        ? 'bg-green-100 text-green-800' 
-        : 'bg-gray-100 text-gray-800'
-    }`}>
-      {active ? 'Active' : 'Inactive'}
-    </span>
-  );
+  const filteredFaqs = faqs
+    .filter(faq => selectedCategory === 'All' || faq.category === selectedCategory)
+    .filter(faq => faq.question.toLowerCase().includes(search.toLowerCase()) || faq.answer.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">FAQs Management</h1>
-          <p className="text-gray-600">Manage frequently asked questions</p>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20">
+              <HelpCircle className="h-5 w-5 text-violet-400" />
+            </div>
+            FAQs Management
+          </h1>
+          <p className="text-slate-400 mt-1 ml-12">{filteredFaqs.length} questions</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-600 transition-colors"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add FAQ
+        <button onClick={openNewModal} className="btn-gradient mt-4 sm:mt-0 flex items-center gap-2">
+          <Plus className="h-4 w-4" /> Add FAQ
         </button>
       </div>
 
-      {/* Search and Filters */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search FAQs..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="">All Categories</option>
-            {categories.map(category => (
-              <option key={category} value={category}>{category}</option>
-            ))}
-          </select>
+      {/* Search & Categories */}
+      <div className="card-dark p-4 space-y-4">
+        <div className="relative group">
+          <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+          <input
+            type="text"
+            placeholder="Search FAQs..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="input-dark pl-10"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {categories.map(category => (
+            <button
+              key={category}
+              onClick={() => setSelectedCategory(category)}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-all duration-200 ${selectedCategory === category
+                ? 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                : 'bg-slate-800/30 text-slate-400 border-slate-700/40 hover:text-white hover:border-slate-600/50'
+                }`}
+            >
+              {category}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* FAQs List */}
-      <div className="space-y-4">
-        {loading ? (
-          <div className="flex justify-center items-center p-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-          </div>
-        ) : (
-          faqs.map((faq) => (
-            <div key={faq.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div 
-                className="p-6 cursor-pointer hover:bg-gray-50 transition-colors"
-                onClick={() => setExpandedFaq(expandedFaq === faq.id ? null : faq.id)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {faq.category}
-                      </span>
-                      <StatusBadge active={faq.is_active} />
-                      {faq.need_for && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                          {faq.need_for}
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900 pr-8">
-                      {faq.question}
-                    </h3>
-                    {expandedFaq === faq.id && (
-                      <div className="mt-4 text-gray-600">
-                        <p>{faq.answer}</p>
-                        <div className="mt-3 text-sm text-gray-500">
-                          Display Order: {faq.display_order}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center space-x-2 ml-4">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingFaq(faq);
-                        setShowForm(true);
-                      }}
-                      className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                      <Edit className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(faq.id);
-                      }}
-                      className="p-2 text-red-600 hover:text-red-900 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                    {expandedFaq === faq.id ? (
-                      <ChevronUp className="h-5 w-5 text-gray-400" />
-                    ) : (
-                      <ChevronDown className="h-5 w-5 text-gray-400" />
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+      {/* FAQ List */}
+      {loading ? (
+        <div className="flex justify-center items-center p-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : filteredFaqs.length === 0 ? (
+        <div className="card-dark p-12 text-center">
+          <HelpCircle className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+          <p className="text-slate-400 text-lg font-medium">No FAQs found</p>
+          <p className="text-slate-600 text-sm mt-1">Try adjusting your search or filter criteria</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filteredFaqs.map((faq) => (
+            <FAQAccordionItem
+              key={faq.id}
+              faq={faq}
+              expanded={expandedId === faq.id}
+              onToggle={() => setExpandedId(expandedId === faq.id ? null : faq.id)}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
+      )}
 
-      {/* Add/Edit FAQ Form Modal */}
-      {showForm && (
-        <FAQForm
-          faq={editingFaq}
+      {/* Modal */}
+      {showModal && (
+        <FAQFormModal
+          formData={formData}
+          setFormData={setFormData}
           onSubmit={handleSubmit}
-          onClose={() => {
-            setShowForm(false);
-            setEditingFaq(null);
-          }}
-          categories={categories}
+          onClose={() => { setShowModal(false); setEditingFaq(null); }}
+          isEditing={!!editingFaq}
         />
       )}
-    </div>
-  );
-}
-
-function FAQForm({ faq, onSubmit, onClose, categories }) {
-  const [formData, setFormData] = useState({
-    question: faq?.question || '',
-    answer: faq?.answer || '',
-    category: faq?.category || 'General',
-    need_for: faq?.need_for || '',
-    display_order: faq?.display_order || 0,
-    is_active: faq?.is_active !== undefined ? faq.is_active : true
-  });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit(formData);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">
-            {faq ? 'Edit FAQ' : 'Add New FAQ'}
-          </h2>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Question *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.question}
-              onChange={(e) => setFormData({ ...formData, question: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Enter the question"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Answer *
-            </label>
-            <textarea
-              required
-              rows={4}
-              value={formData.answer}
-              onChange={(e) => setFormData({ ...formData, answer: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Enter the answer"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category *
-              </label>
-              <select
-                required
-                value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                {categories.map(category => (
-                  <option key={category} value={category}>{category}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Display Order
-              </label>
-              <input
-                type="number"
-                value={formData.display_order}
-                onChange={(e) => setFormData({ ...formData, display_order: parseInt(e.target.value) || 0 })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Need For
-              </label>
-              <input
-                type="text"
-                value={formData.need_for}
-                onChange={(e) => setFormData({ ...formData, need_for: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="e.g., mobile, web, both"
-              />
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="is_active"
-                checked={formData.is_active}
-                onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                className="h-4 w-4 text-primary-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <label htmlFor="is_active" className="ml-2 block text-sm text-gray-900">
-                Active
-              </label>
-            </div>
-          </div>
-
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-600 transition-colors"
-            >
-              {faq ? 'Update FAQ' : 'Create FAQ'}
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
   );
 }
