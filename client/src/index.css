@@ -481,7 +481,71 @@ textarea {
   margin: 16px 0;
 }
 
+/* ── Tables inside the editor ── */
+.blog-editor .ql-editor figure.ql-table-wrapper {
+  margin: 20px 0;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  cursor: default;
+}
+
+.blog-editor .ql-editor figure.ql-table-wrapper table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.blog-editor .ql-editor figure.ql-table-wrapper th {
+  background: rgba(99, 102, 241, 0.15);
+  color: #e5e7eb;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid rgba(75, 85, 99, 0.5);
+}
+
+.blog-editor .ql-editor figure.ql-table-wrapper td {
+  padding: 8px 14px;
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  color: #d1d5db;
+}
+
+.blog-editor .ql-editor figure.ql-table-wrapper tr:nth-child(even) td {
+  background: rgba(30, 41, 59, 0.3);
+}
+
+/* ── Horizontal rule inside the editor ── */
+.blog-editor .ql-editor hr {
+  border: none;
+  border-top: 2px solid rgba(99, 102, 241, 0.3);
+  margin: 24px 0;
+}
+
+/* ── Inline code inside the editor ── */
+.blog-editor .ql-editor code {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'Fira Code', 'JetBrains Mono', monospace;
+}
+
+.blog-editor .ql-editor pre.ql-syntax code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
 /* ========== Blog Preview — Rich Content Styles ========== */
+.blog-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .blog-content h1 {
   font-size: 2em;
   font-weight: 700;
@@ -514,11 +578,15 @@ textarea {
   margin: 1em 0;
   line-height: 1.8;
   color: #d1d5db;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .blog-content a {
   color: #818cf8;
   text-decoration: underline;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .blog-content blockquote {
@@ -535,6 +603,8 @@ textarea {
   border-radius: 8px;
   padding: 16px;
   overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
   font-size: 14px;
   margin: 16px 0;
 }
@@ -545,6 +615,8 @@ textarea {
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.9em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .blog-content pre code {
@@ -571,6 +643,8 @@ textarea {
 .blog-content li {
   margin: 6px 0;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .blog-content img {
@@ -582,4 +656,57 @@ textarea {
 .blog-content hr {
   border-color: rgba(75, 85, 99, 0.5);
   margin: 24px 0;
+}
+
+/* ── Tables inside preview ── */
+.blog-content .ql-table-wrapper,
+.blog-content figure.ql-table-wrapper {
+  margin: 20px 0;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(75, 85, 99, 0.5);
+}
+
+.blog-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.blog-content th {
+  background: rgba(99, 102, 241, 0.15);
+  color: #e5e7eb;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid rgba(75, 85, 99, 0.5);
+}
+
+.blog-content td {
+  padding: 8px 14px;
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  color: #d1d5db;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.blog-content tr:nth-child(even) td {
+  background: rgba(30, 41, 59, 0.3);
+}
+
+/* ── Nested lists in preview ── */
+.blog-content ul ul,
+.blog-content ol ol,
+.blog-content ul ol,
+.blog-content ol ul {
+  margin: 4px 0;
+}
+
+/* ── Inline code vs code blocks in preview ── */
+.blog-content pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
 }

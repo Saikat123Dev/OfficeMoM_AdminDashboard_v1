@@ -1,10 +1,100 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { Marked } from 'marked';
 import {
     ArrowLeft, Edit3, Globe, Clock, Tag, User,
     Calendar, FileLock
 } from 'lucide-react';
 import { blogService } from '../services/api';
+
+/* ─── Detect whether stored content is raw markdown rather than proper HTML.
+ *     If the text (after stripping Quill's wrapping <p> tags) still has many
+ *     markdown markers and very few real semantic HTML tags, it's almost
+ *     certainly raw markdown that was saved without conversion. ──────────── */
+const MARKDOWN_TABLE_SEPARATOR_PATTERN = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/m;
+const ALLOWED_EDITOR_WRAPPER_TAGS = new Set(['p', 'br']);
+const markdownParser = new Marked({
+    gfm: true,
+    breaks: true,
+    async: false
+});
+const MARKDOWN_INLINE_PATTERNS = [
+    /!\[.*?\]\(.*?\)/,
+    /\[.+?\]\((?:https?:\/\/|\/|mailto:).+?\)/,
+    /(^|[^*])\*\*[^*\n]+\*\*(?!\*)/,
+    /(^|[^_])__[^_\n]+__(?!_)/,
+    /(^|[^`])`[^`\n]+`(?!`)/,
+    /~~[^~\n]+~~/
+];
+const SEMANTIC_HTML_TAG = /<(?:h[1-6]|ul|ol|li|table|blockquote|pre|code|hr|strong|em|del|a\s)[\s>]/i;
+
+function extractEditorText(html = '') {
+    return html
+        .replace(/<\/?p[^>]*>/gi, '\n')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .trim();
+}
+
+function hasOnlyEditorWrapperTags(html = '') {
+    if (!html.trim()) return true;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const tags = Array.from(doc.body.querySelectorAll('*'));
+    return tags.every((node) => ALLOWED_EDITOR_WRAPPER_TAGS.has(node.tagName.toLowerCase()));
+}
+
+function hasMarkdownStructureSignals(plainText = '') {
+    const trimmed = plainText.trim();
+    if (!trimmed || /<\/?[a-z][\w:-]*(\s[^>]*)?>/i.test(trimmed)) return false;
+
+    if (
+        /^\s{0,3}#{1,6}(?:\s+|$)/m.test(trimmed)
+        || MARKDOWN_TABLE_SEPARATOR_PATTERN.test(trimmed)
+        || /^\s{0,3}```/m.test(trimmed)
+        || /^\s{0,3}~~~/m.test(trimmed)
+        || /^\s{0,3}>\s+/m.test(trimmed)
+        || /^\s{0,3}- \[[ xX]\]\s+/m.test(trimmed)
+    ) {
+        return true;
+    }
+
+    const unorderedMatches = trimmed.match(/^\s{0,3}(\*|-|\+)\s+/gm) || [];
+    const orderedMatches = trimmed.match(/^\s{0,3}\d+\.\s+/gm) || [];
+    if (unorderedMatches.length >= 2 || orderedMatches.length >= 2) {
+        return true;
+    }
+
+    const inlineHitCount = MARKDOWN_INLINE_PATTERNS.reduce((count, pattern) => (
+        count + (pattern.test(trimmed) ? 1 : 0)
+    ), 0);
+    return inlineHitCount >= 2 && trimmed.includes('\n');
+}
+
+function contentLooksLikeRawMarkdown(html) {
+    if (!html) return false;
+    if (SEMANTIC_HTML_TAG.test(html)) return false;
+    if (!hasOnlyEditorWrapperTags(html)) return false;
+    const stripped = extractEditorText(html);
+    if (!stripped) return false;
+    return hasMarkdownStructureSignals(stripped);
+}
+
+/** Convert raw markdown → sanitised HTML for preview. */
+function renderMarkdownContent(rawContent) {
+    // Strip the wrapping <p> tags that Quill injects around raw text
+    const stripped = extractEditorText(rawContent)
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .trim();
+    try {
+        const result = markdownParser.parse(stripped);
+        return typeof result === 'string' ? result : stripped;
+    } catch {
+        return rawContent;
+    }
+}
 
 export default function BlogPreview() {
     const { id } = useParams();
@@ -27,6 +117,15 @@ export default function BlogPreview() {
             setLoading(false);
         }
     };
+
+    /** Compute rendered HTML: if stored content is raw markdown, convert it. */
+    const renderedContent = useMemo(() => {
+        if (!blog?.content) return '';
+        if (contentLooksLikeRawMarkdown(blog.content)) {
+            return renderMarkdownContent(blog.content);
+        }
+        return blog.content;
+    }, [blog?.content]);
 
     const handleToggleStatus = async () => {
         if (!blog) return;
@@ -59,7 +158,7 @@ export default function BlogPreview() {
     }
 
     return (
-        <div className="space-y-6 max-w-4xl mx-auto">
+        <div className="space-y-6 max-w-4xl mx-auto min-w-0">
             {/* Top Bar */}
             <div className="flex items-center justify-between">
                 <button
@@ -95,7 +194,7 @@ export default function BlogPreview() {
             </div>
 
             {/* Preview Card */}
-            <article className="card-dark overflow-hidden">
+            <article className="card-dark overflow-hidden min-w-0">
                 {/* Featured Image */}
                 {blog.featured_image && (
                     <div className="relative">
@@ -174,8 +273,8 @@ export default function BlogPreview() {
 
                     {/* Content */}
                     <div
-                        className="blog-content prose prose-invert prose-lg max-w-none"
-                        dangerouslySetInnerHTML={{ __html: blog.content }}
+                        className="blog-content prose prose-invert prose-lg max-w-none min-w-0"
+                        dangerouslySetInnerHTML={{ __html: renderedContent }}
                     />
 
                     {/* Meta Description (SEO) */}
