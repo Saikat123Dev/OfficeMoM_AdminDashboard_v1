@@ -2,11 +2,44 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
+import { Marked } from 'marked';
 import {
     ArrowLeft, Save, Globe, Image as ImageIcon, X,
     Upload, Tag, FileText, Eye, Loader2, Check, Clock3, Type, ScanText, Trash2
 } from 'lucide-react';
 import { blogService, uploadService } from '../services/api';
+
+/* ─── Register custom Quill Blots so Quill can persist elements it does not
+ *     support natively (horizontal rules and full HTML tables). ──────────── */
+const QuillCore = ReactQuill.Quill;
+if (QuillCore) {
+    const BlockEmbed = QuillCore.import('blots/block/embed');
+
+    /** Horizontal-rule blot — lets `<hr>` survive the Delta round-trip. */
+    class DividerBlot extends BlockEmbed {
+        static create() { return super.create(); }
+        static value()  { return true; }
+    }
+    DividerBlot.blotName = 'divider';
+    DividerBlot.tagName  = 'hr';
+    QuillCore.register(DividerBlot, true);
+
+    /** Wraps an entire `<table>` as a single non-editable block embed so
+     *  Quill preserves it verbatim in the Delta model. */
+    class TableBlockBlot extends BlockEmbed {
+        static create(value) {
+            const node = super.create();
+            if (typeof value === 'string') node.innerHTML = value;
+            node.setAttribute('contenteditable', 'false');
+            return node;
+        }
+        static value(node) { return node.innerHTML; }
+    }
+    TableBlockBlot.blotName  = 'table-block';
+    TableBlockBlot.tagName   = 'figure';
+    TableBlockBlot.className = 'ql-table-wrapper';
+    QuillCore.register(TableBlockBlot, true);
+}
 
 const QUILL_TOOLBAR = [
     [{ header: 1 }, { header: 2 }, { header: 3 }],
@@ -32,9 +65,10 @@ const BASE_QUILL_MODULES = {
 };
 
 const QUILL_FORMATS = [
-    'header', 'bold', 'italic', 'underline', 'strike',
+    'header', 'font', 'size', 'bold', 'italic', 'underline', 'strike',
     'script', 'color', 'background', 'list', 'indent', 'align', 'direction',
-    'blockquote', 'code-block', 'link', 'image', 'video'
+    'blockquote', 'code-block', 'code', 'link', 'image', 'video',
+    'divider', 'table-block'
 ];
 
 const ALLOWED_IMAGE_TYPES = [
@@ -47,6 +81,40 @@ const ALLOWED_IMAGE_TYPES = [
     'image/svg+xml'
 ];
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+const MARKDOWN_FILE_EXTENSION_PATTERN = /\.(md|markdown|mdown|mkdn|mkd)$/i;
+const MARKDOWN_MIME_TYPES = new Set([
+    'text/markdown',
+    'text/x-markdown',
+    'application/x-markdown'
+]);
+const HTML_TAG_REGEX = /<\/?[a-z][\w:-]*(\s[^>]*)?>/i;
+const MARKDOWN_TABLE_SEPARATOR_PATTERN = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/m;
+const ALLOWED_EDITOR_WRAPPER_TAGS = new Set(['p', 'br']);
+const markdownParser = new Marked({
+    gfm: true,
+    breaks: true,
+    async: false
+});
+const MARKDOWN_BLOCK_PATTERNS = [
+    /^\s{0,3}#{1,6}(?:\s+|$)/m,
+    /^\s{0,3}>\s+/m,
+    /^\s{0,3}([-*_]){3,}\s*$/m,
+    /^\s{0,3}(\*|-|\+)\s+/m,
+    /^\s{0,3}\d+\.\s+/m,
+    /^\s{0,3}```/m,
+    /^\s{0,3}~~~/m,
+    /^\s{0,3}\|.+\|\s*$/m,
+    MARKDOWN_TABLE_SEPARATOR_PATTERN,
+    /^\s{0,3}- \[[ xX]\]\s+/m
+];
+const MARKDOWN_INLINE_PATTERNS = [
+    /!\[.*?\]\(.*?\)/,
+    /\[.+?\]\((?:https?:\/\/|\/|mailto:).+?\)/,
+    /(^|[^*])\*\*[^*\n]+\*\*(?!\*)/,
+    /(^|[^_])__[^_\n]+__(?!_)/,
+    /(^|[^`])`[^`\n]+`(?!`)/,
+    /~~[^~\n]+~~/
+];
 
 const stripHtml = (html = '') => {
     return html
@@ -54,6 +122,150 @@ const stripHtml = (html = '') => {
         .replace(/&nbsp;/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+};
+
+const extractHtmlFromPlainText = (plainText = '') => {
+    const trimmed = plainText.trim();
+    if (!trimmed) return '';
+    if (HTML_TAG_REGEX.test(trimmed)) return trimmed;
+    if (!trimmed.includes('&lt;')) return '';
+
+    const decoded = new DOMParser().parseFromString(trimmed, 'text/html').documentElement.textContent || '';
+    return HTML_TAG_REGEX.test(decoded) ? decoded : '';
+};
+
+const extractTextFromHtml = (html = '') => {
+    if (!html) return '';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return (doc.body?.textContent || '').trim();
+};
+
+const extractEditorText = (html = '') => {
+    return html
+        .replace(/<\/?p[^>]*>/gi, '\n')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .trim();
+};
+
+const hasOnlyEditorWrapperTags = (html = '') => {
+    if (!html.trim()) return true;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const tags = Array.from(doc.body.querySelectorAll('*'));
+    return tags.every((node) => ALLOWED_EDITOR_WRAPPER_TAGS.has(node.tagName.toLowerCase()));
+};
+
+const looksLikeMarkdown = (plainText = '') => {
+    const trimmed = plainText.trim();
+    if (!trimmed) return false;
+    if (HTML_TAG_REGEX.test(trimmed)) return false;
+
+    if (MARKDOWN_BLOCK_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+        return true;
+    }
+
+    const inlineHitCount = MARKDOWN_INLINE_PATTERNS.reduce((count, pattern) => (
+        count + (pattern.test(trimmed) ? 1 : 0)
+    ), 0);
+
+    return inlineHitCount >= 2 || (inlineHitCount >= 1 && trimmed.includes('\n'));
+};
+
+const hasStrongMarkdownSignals = (plainText = '') => {
+    const trimmed = plainText.trim();
+    if (!trimmed || HTML_TAG_REGEX.test(trimmed)) return false;
+
+    return (
+        /^\s{0,3}#{1,6}(?:\s+|$)/m.test(trimmed)
+        || MARKDOWN_TABLE_SEPARATOR_PATTERN.test(trimmed)
+        || /^\s{0,3}```/m.test(trimmed)
+        || /^\s{0,3}~~~/m.test(trimmed)
+        || /^\s{0,3}- \[[ xX]\]\s+/m.test(trimmed)
+        || /^\s{0,3}>\s+/m.test(trimmed)
+        || /^\s{0,3}(\*|-|\+)\s+/m.test(trimmed)
+        || /^\s{0,3}\d+\.\s+/m.test(trimmed)
+    );
+};
+
+const hasMarkdownStructureSignals = (plainText = '') => {
+    const trimmed = plainText.trim();
+    if (!trimmed || HTML_TAG_REGEX.test(trimmed)) return false;
+
+    if (
+        /^\s{0,3}#{1,6}(?:\s+|$)/m.test(trimmed)
+        || MARKDOWN_TABLE_SEPARATOR_PATTERN.test(trimmed)
+        || /^\s{0,3}```/m.test(trimmed)
+        || /^\s{0,3}~~~/m.test(trimmed)
+        || /^\s{0,3}>\s+/m.test(trimmed)
+        || /^\s{0,3}- \[[ xX]\]\s+/m.test(trimmed)
+    ) {
+        return true;
+    }
+
+    const unorderedMatches = trimmed.match(/^\s{0,3}(\*|-|\+)\s+/gm) || [];
+    const orderedMatches = trimmed.match(/^\s{0,3}\d+\.\s+/gm) || [];
+    if (unorderedMatches.length >= 2 || orderedMatches.length >= 2) {
+        return true;
+    }
+
+    const inlineHitCount = MARKDOWN_INLINE_PATTERNS.reduce((count, pattern) => (
+        count + (pattern.test(trimmed) ? 1 : 0)
+    ), 0);
+    return inlineHitCount >= 2 && trimmed.includes('\n');
+};
+
+const swallowClipboardEvent = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+    }
+};
+
+const normalizeClipboardText = (text = '') => text.replace(/\r\n/g, '\n');
+
+const isMarkdownFile = (file) => {
+    if (!file) return false;
+    const fileName = typeof file.name === 'string' ? file.name : '';
+    const mimeType = typeof file.type === 'string' ? file.type.toLowerCase() : '';
+    return MARKDOWN_FILE_EXTENSION_PATTERN.test(fileName) || MARKDOWN_MIME_TYPES.has(mimeType);
+};
+
+const isEditorEffectivelyEmpty = (html = '') => {
+    const plainText = stripHtml(html).replace(/\u200B/g, '').trim();
+    return plainText.length === 0;
+};
+
+const sanitizePastedHtml = (html = '') => {
+    if (!html) return '';
+
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('script, style, iframe, object, embed').forEach((node) => node.remove());
+
+    doc.querySelectorAll('*').forEach((node) => {
+        for (const attr of Array.from(node.attributes)) {
+            const name = attr.name.toLowerCase();
+            const value = attr.value.trim().toLowerCase();
+            if (name.startsWith('on')) {
+                node.removeAttribute(attr.name);
+                continue;
+            }
+            if ((name === 'href' || name === 'src') && value.startsWith('javascript:')) {
+                node.removeAttribute(attr.name);
+            }
+        }
+    });
+
+    return doc.body.innerHTML;
+};
+
+const markdownToHtml = (markdown = '') => {
+    try {
+        const parsed = markdownParser.parse(markdown);
+        return sanitizePastedHtml(typeof parsed === 'string' ? parsed : '');
+    } catch (err) {
+        console.error('Markdown→HTML conversion failed:', err);
+        return '';
+    }
 };
 
 const toAbsoluteImageUrl = (rawUrl) => {
@@ -64,6 +276,94 @@ const toAbsoluteImageUrl = (rawUrl) => {
     if (url.startsWith('//')) return `https:${url}`;
     if (url.startsWith('/')) return `${window.location.origin}${url}`;
     return `https://${url}`;
+};
+
+/* ─── Quill HTML pre-/post-processing helpers ───────────────────────────── */
+
+/** Wrap bare `<table>` elements in the custom TableBlockBlot wrapper
+ *  so Quill can represent them in its Delta model. */
+const wrapTablesForQuill = (html) => {
+    if (!html || !html.includes('<table')) return html || '';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('table').forEach((table) => {
+        if (table.closest('.ql-table-wrapper')) return;          // already wrapped
+        const wrapper = doc.createElement('figure');
+        wrapper.className = 'ql-table-wrapper';
+        wrapper.setAttribute('contenteditable', 'false');
+        table.parentNode.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+    });
+    return doc.body.innerHTML;
+};
+
+/** Convert `marked`'s task-list checkbox HTML to plain-text markers
+ *  (Quill has no native checkbox-in-list blot). */
+const convertTaskListsForQuill = (html) => {
+    return html
+        .replace(/<li>\s*<input\s+[^>]*checked[^>]*\/?>\s*/gi, '<li>☑ ')
+        .replace(/<li>\s*<input\s+[^>]*type=["']checkbox["'][^>]*\/?>\s*/gi, '<li>☐ ');
+};
+
+/** Normalise `<del>` → `<s>` so Quill's native strike-through format picks it up. */
+const normaliseStrikethrough = (html) => {
+    return html.replace(/<del>/gi, '<s>').replace(/<\/del>/gi, '</s>');
+};
+
+/** Full pre-processing pipeline: Markdown/HTML → Quill-ready HTML. */
+const preprocessHtmlForQuill = (html) => {
+    if (!html) return '';
+    let out = html;
+    out = normaliseStrikethrough(out);
+    out = convertTaskListsForQuill(out);
+    out = wrapTablesForQuill(out);
+    return out;
+};
+
+/** Strip editor-only wrappers so the persisted HTML stays clean. */
+const cleanContentForSave = (html) => {
+    if (!html) return html;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('figure.ql-table-wrapper').forEach((wrapper) => {
+        const table = wrapper.querySelector('table');
+        if (table) {
+            wrapper.replaceWith(table);
+        } else {
+            wrapper.remove();
+        }
+    });
+    doc.querySelectorAll('[contenteditable]').forEach((el) => {
+        el.removeAttribute('contenteditable');
+    });
+    return doc.body.innerHTML;
+};
+
+/* ─── Detect & convert raw-markdown content already stored in the DB ────── */
+const SEMANTIC_TAG = /<(?:h[1-6]|ul|ol|li|table|blockquote|pre|code|hr|strong|em|del|a\s)[\s>]/i;
+
+const contentLooksLikeRawMarkdown = (html) => {
+    if (!html) return false;
+    if (SEMANTIC_TAG.test(html)) return false;
+    if (!hasOnlyEditorWrapperTags(html)) return false;
+    const stripped = extractEditorText(html);
+    if (!stripped) return false;
+    return hasMarkdownStructureSignals(stripped);
+};
+
+const convertStoredMarkdownToHtml = (rawContent) => {
+    const stripped = extractEditorText(rawContent)
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .trim();
+    try {
+        const result = markdownParser.parse(stripped);
+        const html = typeof result === 'string' ? result : rawContent;
+        return preprocessHtmlForQuill(sanitizePastedHtml(html));
+    } catch {
+        return rawContent;
+    }
 };
 
 export default function BlogEditor() {
@@ -89,9 +389,11 @@ export default function BlogEditor() {
     const [dragActive, setDragActive] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
     const [error, setError] = useState('');
+    const [editorViewMode, setEditorViewMode] = useState('write');
 
     const fileInputRef = useRef(null);
     const editorImageInputRef = useRef(null);
+    const markdownInputRef = useRef(null);
     const quillRef = useRef(null);
 
     useEffect(() => {
@@ -118,7 +420,12 @@ export default function BlogEditor() {
             const res = await blogService.getBlog(id);
             const blog = res.data.blog;
             setTitle(blog.title || '');
-            setContent(blog.content || '');
+            // If previously-saved content is raw markdown (not HTML), convert it
+            let loadedContent = blog.content || '';
+            if (loadedContent && contentLooksLikeRawMarkdown(loadedContent)) {
+                loadedContent = convertStoredMarkdownToHtml(loadedContent);
+            }
+            setContent(wrapTablesForQuill(loadedContent));
             setExcerpt(blog.excerpt || '');
             setMetaDescription(blog.meta_description || '');
             setFeaturedImage(blog.featured_image || '');
@@ -141,10 +448,10 @@ export default function BlogEditor() {
         }
     };
 
-    const showSaveMessage = (msg) => {
+    const showSaveMessage = useCallback((msg) => {
         setSaveMessage(msg);
         setTimeout(() => setSaveMessage(''), 3000);
-    };
+    }, []);
 
     const validateImageFile = (file) => {
         if (!file) return false;
@@ -205,12 +512,114 @@ export default function BlogEditor() {
         } finally {
             setUploadingEditorImage(false);
         }
-    }, []);
+    }, [showSaveMessage]);
 
     const handleEditorToolbarImage = useCallback(() => {
         if (uploadingEditorImage) return;
         editorImageInputRef.current?.click();
     }, [uploadingEditorImage]);
+
+    const insertHtmlAtCursor = useCallback((html) => {
+        if (!html) return;
+        const quill = quillRef.current?.getEditor();
+        if (!quill) return;
+
+        // Sanitise, then run through the full Quill-compat pipeline
+        let processed = sanitizePastedHtml(html);
+        processed = preprocessHtmlForQuill(processed);
+
+        const selection = quill.getSelection(true);
+        const index = selection?.index ?? quill.getLength();
+
+        // Replace any selected text first
+        if (selection && selection.length > 0) {
+            quill.deleteText(index, selection.length, 'silent');
+        }
+
+        quill.clipboard.dangerouslyPasteHTML(index, processed, 'user');
+
+        // Let Quill finish its internal update before syncing React state
+        requestAnimationFrame(() => {
+            setContent(quill.root.innerHTML);
+        });
+    }, []);
+
+    const replaceEditorContentWithHtml = useCallback((html) => {
+        if (!html) return false;
+        const quill = quillRef.current?.getEditor();
+        if (!quill) {
+            setContent(preprocessHtmlForQuill(sanitizePastedHtml(html)));
+            return true;
+        }
+
+        const processed = preprocessHtmlForQuill(sanitizePastedHtml(html));
+        quill.setText('', 'silent');
+        quill.clipboard.dangerouslyPasteHTML(0, processed, 'user');
+
+        requestAnimationFrame(() => {
+            setContent(quill.root.innerHTML);
+            quill.setSelection(0, 0, 'silent');
+        });
+        return true;
+    }, []);
+
+    const insertMarkdownAtCursor = useCallback((markdownText, successMessage = '') => {
+        const normalizedMarkdown = normalizeClipboardText(markdownText || '').trim();
+        if (!normalizedMarkdown) return false;
+
+        const markdownHtml = markdownToHtml(normalizedMarkdown);
+        if (!markdownHtml) return false;
+
+        insertHtmlAtCursor(markdownHtml);
+        if (successMessage) {
+            showSaveMessage(successMessage);
+        }
+        return true;
+    }, [insertHtmlAtCursor, showSaveMessage]);
+
+    const importMarkdownFile = useCallback(async (file, { replaceContent = false } = {}) => {
+        if (!file || !isMarkdownFile(file)) {
+            setError('Please choose a valid Markdown file (.md or .markdown).');
+            return false;
+        }
+
+        try {
+            setError('');
+            const rawMarkdown = normalizeClipboardText(await file.text());
+            if (!rawMarkdown.trim()) {
+                setError('Markdown file is empty.');
+                return false;
+            }
+
+            const fileLabel = file.name || 'Markdown file';
+            if (replaceContent) {
+                const markdownHtml = markdownToHtml(rawMarkdown);
+                if (!markdownHtml) {
+                    setError('Unable to parse markdown file.');
+                    return false;
+                }
+                replaceEditorContentWithHtml(markdownHtml);
+                setEditorViewMode('preview');
+                showSaveMessage(`✅ Imported ${fileLabel}`);
+                return true;
+            }
+
+            const inserted = insertMarkdownAtCursor(rawMarkdown, `✅ Rendered ${fileLabel}`);
+            if (!inserted) {
+                setError('Unable to parse markdown file.');
+                return false;
+            }
+            return true;
+        } catch (err) {
+            setError('Failed to read markdown file.');
+            console.error('Markdown import error:', err);
+            return false;
+        }
+    }, [insertMarkdownAtCursor, replaceEditorContentWithHtml, showSaveMessage]);
+
+    const handleImportMarkdownClick = useCallback(() => {
+        markdownInputRef.current?.click();
+    }, []);
 
     const quillModules = useMemo(() => ({
         ...BASE_QUILL_MODULES,
@@ -234,24 +643,118 @@ export default function BlogEditor() {
                 return;
             }
 
-            const onPaste = async (event) => {
-                const items = Array.from(event.clipboardData?.items || []);
+            /** Core paste handler — shared between document & editor-root listeners. */
+            const handlePaste = async (event) => {
+                const clipboardData = event.clipboardData;
+                if (!clipboardData) return false;
+                const items = Array.from(clipboardData.items || []);
+
+                /* ── 0. Markdown-file paste from OS clipboard ───────────── */
+                for (const item of items) {
+                    if (item.kind !== 'file') continue;
+                    const file = item.getAsFile();
+                    if (!isMarkdownFile(file)) continue;
+
+                    swallowClipboardEvent(event);
+                    const rawMarkdown = normalizeClipboardText(await file.text());
+                    if (!rawMarkdown.trim()) {
+                        setError('Markdown file is empty.');
+                        return true;
+                    }
+
+                    const fileLabel = file.name || 'Markdown file';
+                    const inserted = insertMarkdownAtCursor(rawMarkdown, `✅ Rendered ${fileLabel}`);
+                    if (!inserted) {
+                        setError('Unable to parse markdown file.');
+                    }
+                    return true;
+                }
+
+                /* ── 1. Collect all clipboard representations ────────────── */
+                const markdownMimeText = clipboardData.getData('text/markdown')
+                    || clipboardData.getData('text/x-markdown')
+                    || '';
+                const plainText  = clipboardData.getData('text/plain') || '';
+                const htmlFromCb = clipboardData.getData('text/html')  || '';
+
+                /* Prefer explicit markdown MIME; fallback to plain text. */
+                const fallbackTextFromHtml = extractTextFromHtml(htmlFromCb);
+                const markdownSourceRaw = markdownMimeText.trim()
+                    ? markdownMimeText
+                    : (plainText.trim() ? plainText : fallbackTextFromHtml);
+                const markdownSource = normalizeClipboardText(markdownSourceRaw);
+
+                /* ── 2. Markdown detection (aggressive) ─────────────────── */
+                const shouldParseAsMarkdown = Boolean(markdownSource.trim()) && (
+                    Boolean(markdownMimeText.trim())
+                    || looksLikeMarkdown(markdownSource)
+                    || hasStrongMarkdownSignals(markdownSource)
+                );
+
+                if (shouldParseAsMarkdown) {
+                    const markdownHtml = markdownToHtml(markdownSource);
+                    if (markdownHtml) {
+                        swallowClipboardEvent(event);
+                        insertHtmlAtCursor(markdownHtml);
+                        return true;
+                    }
+                }
+
+                /* ── 3. Rich-HTML fallback ──────────────────────────────── */
+                const htmlFromPlainText = extractHtmlFromPlainText(plainText);
+                const htmlCandidate = HTML_TAG_REGEX.test(htmlFromCb)
+                    ? htmlFromCb
+                    : htmlFromPlainText;
+
+                if (htmlCandidate) {
+                    swallowClipboardEvent(event);
+                    insertHtmlAtCursor(htmlCandidate);
+                    return true;
+                }
+
+                /* ── 4. Image-only paste ────────────────────────────────── */
+                const hasTextPayload = plainText.trim().length > 0 || htmlFromCb.trim().length > 0;
                 const imageItems = items.filter((item) => item.type?.startsWith('image/'));
-                if (imageItems.length === 0) return;
+                if (imageItems.length === 0) return false;
+                if (hasTextPayload) return false;
 
-                event.preventDefault();
+                swallowClipboardEvent(event);
                 let index = quill.getSelection(true)?.index ?? quill.getLength();
-
                 for (const item of imageItems) {
                     const file = item.getAsFile();
                     if (!file) continue;
                     await uploadEditorImage(file, index);
                     index += 1;
                 }
+                return true;
+            };
+
+            /* Handler for document-level capture (fires before any child). */
+            const onDocumentPaste = async (event) => {
+                const eventTarget = event.target;
+                const targetNode = eventTarget instanceof Node ? eventTarget : null;
+                const isInsideEditor = Boolean(targetNode && quill.root.contains(targetNode));
+                if (!isInsideEditor && !quill.hasFocus()) return;
+                await handlePaste(event);
+            };
+
+            /* Backup handler directly on the editor root — catches anything
+               that slips past the document-level listener. */
+            const onEditorPaste = async (event) => {
+                // Only run if the document handler didn't already stop propagation
+                if (event.defaultPrevented) return;
+                await handlePaste(event);
             };
 
             const onDrop = async (event) => {
                 const files = Array.from(event.dataTransfer?.files || []);
+                const markdownFile = files.find((file) => isMarkdownFile(file));
+                if (markdownFile) {
+                    event.preventDefault();
+                    await importMarkdownFile(markdownFile, { replaceContent: false });
+                    return;
+                }
+
                 const imageFiles = files.filter((file) => file.type?.startsWith('image/'));
                 if (imageFiles.length === 0) return;
 
@@ -263,10 +766,15 @@ export default function BlogEditor() {
                 }
             };
 
-            quill.root.addEventListener('paste', onPaste);
+            /* Attach handlers — capture phase so we run before Quill's own
+               clipboard module. */
+            document.addEventListener('paste', onDocumentPaste, true);
+            quill.root.addEventListener('paste', onEditorPaste, true);
             quill.root.addEventListener('drop', onDrop);
+
             detachListeners = () => {
-                quill.root.removeEventListener('paste', onPaste);
+                document.removeEventListener('paste', onDocumentPaste, true);
+                quill.root.removeEventListener('paste', onEditorPaste, true);
                 quill.root.removeEventListener('drop', onDrop);
             };
         };
@@ -277,7 +785,7 @@ export default function BlogEditor() {
             canceled = true;
             detachListeners();
         };
-    }, [uploadEditorImage]);
+    }, [uploadEditorImage, insertHtmlAtCursor, insertMarkdownAtCursor, importMarkdownFile]);
 
     const replaceEmbeddedImagesWithUploads = async (htmlContent) => {
         if (!htmlContent || !htmlContent.includes('data:image/')) {
@@ -333,6 +841,23 @@ export default function BlogEditor() {
             await uploadEditorImage(file, index);
         }
         e.target.value = '';
+    };
+
+    const handleMarkdownFileInputChange = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) {
+            event.target.value = '';
+            return;
+        }
+
+        const shouldReplace = isEditorEffectivelyEmpty(content)
+            || window.confirm('Replace current editor content with this Markdown file?');
+
+        if (shouldReplace) {
+            await importMarkdownFile(file, { replaceContent: true });
+        }
+
+        event.target.value = '';
     };
 
     const findSelectedImageIndex = (quill) => {
@@ -406,10 +931,17 @@ export default function BlogEditor() {
             setError('');
 
             let finalContent = content;
+            if (contentLooksLikeRawMarkdown(finalContent)) {
+                finalContent = convertStoredMarkdownToHtml(finalContent);
+                setContent(finalContent);
+            }
             if (finalContent.includes('data:image/')) {
                 finalContent = await replaceEmbeddedImagesWithUploads(finalContent);
                 setContent(finalContent);
             }
+
+            // Strip editor-only wrappers so stored HTML is portable
+            finalContent = cleanContentForSave(finalContent);
 
             const payload = {
                 title: title.trim(),
@@ -470,6 +1002,13 @@ export default function BlogEditor() {
     const plainTextContent = useMemo(() => stripHtml(content), [content]);
     const wordCount = useMemo(() => (plainTextContent ? plainTextContent.split(' ').length : 0), [plainTextContent]);
     const charCount = useMemo(() => plainTextContent.length, [plainTextContent]);
+    const editorPreviewHtml = useMemo(() => {
+        if (!content) return '';
+        const normalizedContent = contentLooksLikeRawMarkdown(content)
+            ? convertStoredMarkdownToHtml(content)
+            : content;
+        return sanitizePastedHtml(cleanContentForSave(normalizedContent));
+    }, [content]);
     const estimatedReadMinutes = useMemo(() => {
         if (!wordCount) return 0;
         return Math.max(1, Math.ceil(wordCount / 200));
@@ -484,7 +1023,7 @@ export default function BlogEditor() {
     }
 
     return (
-        <div className="space-y-6 max-w-6xl mx-auto">
+        <div className="space-y-6 max-w-6xl mx-auto min-w-0">
             {/* Top Bar */}
             <div className="flex items-center justify-between">
                 <button
@@ -542,9 +1081,9 @@ export default function BlogEditor() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
                 {/* Main Editor — 2 cols */}
-                <div className="lg:col-span-2 space-y-6">
+                <div className="lg:col-span-2 space-y-6 min-w-0">
                     <div className="card-dark p-6">
                         <input
                             type="text"
@@ -555,21 +1094,83 @@ export default function BlogEditor() {
                         />
                     </div>
 
-                    <div className="card-dark overflow-hidden blog-editor">
-                        <ReactQuill
-                            ref={quillRef}
-                            value={content}
-                            onChange={setContent}
-                            modules={quillModules}
-                            formats={QUILL_FORMATS}
-                            placeholder="Start writing your blog post..."
-                            theme="snow"
-                        />
+                    <div className="card-dark overflow-hidden">
+                        <div className="px-4 py-3 border-b border-slate-700/50 bg-slate-900/40 flex flex-wrap items-center justify-between gap-3">
+                            <div className="inline-flex items-center rounded-lg border border-slate-700/60 bg-slate-900/50 p-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditorViewMode('write')}
+                                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                                        editorViewMode === 'write'
+                                            ? 'bg-indigo-500/20 text-indigo-200'
+                                            : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                >
+                                    Write
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setEditorViewMode('preview')}
+                                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                                        editorViewMode === 'preview'
+                                            ? 'bg-indigo-500/20 text-indigo-200'
+                                            : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                >
+                                    Preview
+                                </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleImportMarkdownClick}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-600/60 bg-slate-800/50 text-slate-200 text-xs hover:bg-slate-700/50 transition-colors"
+                                >
+                                    <FileText className="h-3.5 w-3.5" />
+                                    Import .md
+                                </button>
+                                <span className="text-[11px] text-slate-500">Paste markdown or drop a `.md` file</span>
+                            </div>
+                        </div>
+
+                        <div className={`${editorViewMode === 'write' ? 'block' : 'hidden'} blog-editor`}>
+                            <ReactQuill
+                                ref={quillRef}
+                                value={content}
+                                onChange={setContent}
+                                modules={quillModules}
+                                formats={QUILL_FORMATS}
+                                placeholder="Start writing your blog post..."
+                                theme="snow"
+                            />
+                        </div>
+
+                        {editorViewMode === 'preview' && (
+                            <div className="p-6 sm:p-8 min-h-[420px] min-w-0">
+                                {editorPreviewHtml ? (
+                                    <div
+                                        className="blog-content prose prose-invert prose-lg max-w-none min-w-0"
+                                        dangerouslySetInnerHTML={{ __html: editorPreviewHtml }}
+                                    />
+                                ) : (
+                                    <p className="text-slate-500 text-sm">Nothing to preview yet. Start writing or import markdown.</p>
+                                )}
+                            </div>
+                        )}
+
                         <input
                             ref={editorImageInputRef}
                             type="file"
                             accept="image/*"
                             onChange={handleEditorImageInputChange}
+                            className="hidden"
+                        />
+
+                        <input
+                            ref={markdownInputRef}
+                            type="file"
+                            accept=".md,.markdown,text/markdown,text/plain"
+                            onChange={handleMarkdownFileInputChange}
                             className="hidden"
                         />
                     </div>
