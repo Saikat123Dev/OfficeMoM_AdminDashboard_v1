@@ -44,6 +44,27 @@ const normalizeFaqPayload = (body = {}, { forUpdate = false } = {}) => {
   };
 };
 
+// Get FAQ options (categories and need_for)
+router.get('/options', authenticateToken, async (req, res) => {
+  try {
+    const [categories] = await pool.execute(
+      `SELECT DISTINCT category FROM faqs WHERE category IS NOT NULL AND category != '' ORDER BY category ASC`
+    );
+    const [needFor] = await pool.execute(
+      `SELECT DISTINCT need_for FROM faqs WHERE need_for IS NOT NULL AND need_for != '' ORDER BY need_for ASC`
+    );
+
+    res.json({
+      success: true,
+      categories: categories.map(row => row.category),
+      need_for: needFor.map(row => row.need_for)
+    });
+  } catch (error) {
+    console.error('Error fetching FAQ options:', error);
+    res.status(500).json({ success: false, error: 'Failed to load FAQ options' });
+  }
+});
+
 // Get all FAQs
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -114,8 +135,8 @@ router.post('/', authenticateToken, async (req, res) => {
       [result.insertId]
     );
 
-    res.status(201).json({ 
-      success: true, 
+    res.status(201).json({
+      success: true,
       message: 'FAQ created successfully',
       faq: createdRows[0]
     });

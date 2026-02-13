@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, ChevronDown, ChevronUp, HelpCircle, X, Tag, CheckCircle, AlertCircle } from 'lucide-react';
 import { faqsService } from '../services/api';
+import CreatableSelect from '../components/CreatableSelect';
 
 /* ========== Sub-Components ========== */
 
@@ -130,34 +131,22 @@ const FAQFormModal = ({ formData, setFormData, onSubmit, onClose, isEditing, cat
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">Category</label>
-            <input
-              list="faq-category-options"
+            <CreatableSelect
+              label="Category"
               value={formData.category}
-              onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-              className="input-dark"
-              placeholder="e.g. General"
+              onChange={(val) => setFormData({ ...formData, category: val })}
+              options={categoryOptions}
+              placeholder="Select or type category..."
             />
-            <datalist id="faq-category-options">
-              {categoryOptions.map((category) => (
-                <option key={category} value={category} />
-              ))}
-            </datalist>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">Need For</label>
-            <input
-              list="faq-needfor-options"
+            <CreatableSelect
+              label="Need For"
               value={formData.need_for}
-              onChange={(e) => setFormData({ ...formData, need_for: e.target.value })}
-              className="input-dark"
-              placeholder="e.g. mainPage"
+              onChange={(val) => setFormData({ ...formData, need_for: val })}
+              options={needForOptions}
+              placeholder="Select or type user need..."
             />
-            <datalist id="faq-needfor-options">
-              {needForOptions.map((needFor) => (
-                <option key={needFor} value={needFor} />
-              ))}
-            </datalist>
           </div>
         </div>
 
@@ -215,23 +204,41 @@ export default function FAQs() {
   const [editingFaq, setEditingFaq] = useState(null);
   const [pageError, setPageError] = useState('');
   const [modalError, setModalError] = useState('');
+  const [faqOptions, setFaqOptions] = useState({ categories: [], need_for: [] });
   const [formData, setFormData] = useState({
     question: '',
     answer: '',
-    category: 'General',
-    need_for: 'mainPage',
+    category: '',
+    need_for: '',
     display_order: 0,
     status: 'active'
   });
 
   const defaultCategories = ['General', 'Technical', 'Billing', 'Account'];
   const defaultNeedForOptions = ['mainPage', 'dashboard', 'help', 'pricing', 'account', 'support'];
-  const categories = ['All', ...new Set([...defaultCategories, ...faqs.map(f => f.category).filter(Boolean)])];
-  const needForOptions = [...new Set([...defaultNeedForOptions, ...faqs.map(f => f.need_for).filter(Boolean)])];
+
+  const categoriesList = ['All', ...new Set([ ...faqOptions.categories, ...faqs.map(f => f.category).filter(Boolean)])];
+  const modalCategoryOptions = [...new Set([ ...faqOptions.categories])];
+  const modalNeedForOptions = [...new Set([ ...faqOptions.need_for])];
 
   useEffect(() => {
     loadFaqs();
+    loadOptions();
   }, []);
+
+  const loadOptions = async () => {
+    try {
+      const response = await faqsService.getOptions();
+      if (response.data?.success) {
+        setFaqOptions({
+          categories: response.data.categories || [],
+          need_for: response.data.need_for || []
+        });
+      }
+    } catch (error) {
+      console.error('Error loading FAQ options:', error);
+    }
+  };
 
   const loadFaqs = async () => {
     try {
@@ -288,12 +295,12 @@ export default function FAQs() {
       setFormData({
         question: '',
         answer: '',
-        category: 'General',
-        need_for: 'mainPage',
+        category: '',
+        need_for: '',
         display_order: 0,
         status: 'active'
       });
-      await loadFaqs();
+      await Promise.all([loadFaqs(), loadOptions()]);
     } catch (error) {
       console.error('Error saving FAQ:', error);
       setModalError(error.response?.data?.error || 'Failed to save FAQ');
@@ -334,8 +341,8 @@ export default function FAQs() {
     setFormData({
       question: '',
       answer: '',
-      category: 'General',
-      need_for: 'mainPage',
+      category: '',
+      need_for: '',
       display_order: 0,
       status: 'active'
     });
@@ -377,7 +384,7 @@ export default function FAQs() {
           />
         </div>
         <div className="flex flex-wrap gap-2">
-          {categories.map(category => (
+          {categoriesList.map(category => (
             <button
               key={category}
               onClick={() => setSelectedCategory(category)}
@@ -430,8 +437,8 @@ export default function FAQs() {
           onSubmit={handleSubmit}
           onClose={() => { setShowModal(false); setEditingFaq(null); setModalError(''); }}
           isEditing={!!editingFaq}
-          categoryOptions={categories.filter(c => c !== 'All')}
-          needForOptions={needForOptions}
+          categoryOptions={modalCategoryOptions}
+          needForOptions={modalNeedForOptions}
           submitting={submitting}
           error={modalError}
         />

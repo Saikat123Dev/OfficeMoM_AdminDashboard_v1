@@ -58,6 +58,7 @@ export const usersService = {
 
 export const faqsService = {
   getFaqs: (params) => api.get('/faqs', { params }),
+  getOptions: () => api.get('/faqs/options'),
   createFaq: (data) => api.post('/faqs', data),
   updateFaq: (id, data) => api.put(`/faqs/${id}`, data),
   deleteFaq: (id) => api.delete(`/faqs/${id}`)
