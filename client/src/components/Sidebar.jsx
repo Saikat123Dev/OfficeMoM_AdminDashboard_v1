@@ -5,19 +5,31 @@ import {
   X,
   LayoutDashboard,
   Users,
+  Inbox,
+  Brain,
   HelpCircle,
+  BookOpenText,
+  Layers,
+  Package,
   CreditCard,
   FileText,
   Bell,
+  UserMinus,
   ChevronRight
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Users', href: '/users', icon: Users },
+  { name: 'Contacts', href: '/contacts', icon: Inbox },
+  { name: 'Intent Keywords', href: '/intent-keywords', icon: Brain },
   { name: 'FAQs', href: '/faqs', icon: HelpCircle },
+  { name: 'OfficeMoM Details', href: '/officemom-details', icon: BookOpenText },
+  { name: 'Features', href: '/features', icon: Layers },
+  { name: 'Recharge Packages', href: '/recharge-packages', icon: Package },
   { name: 'Blog Posts', href: '/blogs', icon: FileText },
   { name: 'Pricing', href: '/pricing', icon: CreditCard },
+  { name: 'Cancellations', href: '/subscription-cancellations', icon: UserMinus },
   { name: 'Notifications', href: '/notifications', icon: Bell },
 ];
 

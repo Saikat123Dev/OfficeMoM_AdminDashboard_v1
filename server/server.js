@@ -6,7 +6,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Import database configuration
-const pool = require('./config/database');
+const database = require('./config/database');
+const { dbTargetContextMiddleware, DB_TARGET_HEADER, getCurrentDbTarget } = database;
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -23,14 +24,14 @@ const errorHandler = require('./middleware/errorHandler');
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", DB_TARGET_HEADER],
 }));
 
 // Handle preflight safely
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Headers", `Content-Type, Authorization, ${DB_TARGET_HEADER}`);
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
@@ -39,17 +40,25 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
+app.use(dbTargetContextMiddleware);
 
 // Test database connection
 app.get('/api/test-db', async (req, res) => {
   try {
-    const connection = await pool.getConnection();
-    console.log('Database connected successfully');
+    const connection = await database.getConnection();
+    const selectedDbTarget = getCurrentDbTarget();
+    console.log(`Database connected successfully (${selectedDbTarget})`);
     connection.release();
-    res.json({ message: 'Database connected successfully' });
+    res.json({
+      message: 'Database connected successfully',
+      dbTarget: selectedDbTarget
+    });
   } catch (error) {
     console.error('Database connection failed:', error);
-    res.status(500).json({ error: 'Database connection failed' });
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Database connection failed'
+    });
   }
 });
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Users, HelpCircle, CreditCard, TrendingUp, Eye, UserPlus, FileText,
-  ArrowUpRight, Calendar, Clock, Activity, DollarSign, Mic, BarChart3
+  ArrowUpRight, Calendar, Clock, Activity, DollarSign, Mic, BarChart3, BookOpenText, Layers, UserMinus, Package, Inbox, Brain
 } from 'lucide-react';
 import { usersService } from '../services/api';
 import { useNavigate } from 'react-router-dom';
@@ -153,9 +153,15 @@ export default function Dashboard() {
 
   const quickActions = [
     { icon: Users, title: 'Manage Users', description: 'View and manage all users', color: 'bg-gradient-to-br from-indigo-500 to-cyan-500', onClick: () => navigate('/users') },
+    { icon: Inbox, title: 'Contacts', description: 'Read contact form messages', color: 'bg-gradient-to-br from-sky-500 to-cyan-500', onClick: () => navigate('/contacts') },
+    { icon: Brain, title: 'Intent Keywords', description: 'Manage NLP intent keywords', color: 'bg-gradient-to-br from-violet-500 to-indigo-500', onClick: () => navigate('/intent-keywords') },
     { icon: HelpCircle, title: 'FAQ System', description: 'Manage help content', color: 'bg-gradient-to-br from-violet-500 to-pink-500', onClick: () => navigate('/faqs') },
+    { icon: BookOpenText, title: 'OfficeMoM Details', description: 'Manage detail content blocks', color: 'bg-gradient-to-br from-cyan-500 to-blue-500', onClick: () => navigate('/officemom-details') },
+    { icon: Layers, title: 'Features', description: 'Manage product feature list', color: 'bg-gradient-to-br from-emerald-500 to-teal-500', onClick: () => navigate('/features') },
+    { icon: Package, title: 'Recharge Packs', description: 'Manage minute top-up packages', color: 'bg-gradient-to-br from-amber-500 to-yellow-500', onClick: () => navigate('/recharge-packages') },
+    { icon: UserMinus, title: 'Cancellations', description: 'Track why users cancel plans', color: 'bg-gradient-to-br from-rose-500 to-red-500', onClick: () => navigate('/subscription-cancellations') },
     { icon: CreditCard, title: 'Pricing Plans', description: 'Configure subscriptions', color: 'bg-gradient-to-br from-amber-500 to-orange-500', onClick: () => navigate('/pricing') },
-    { icon: FileText, title: 'Blog Posts', description: 'Manage blog content', color: 'bg-gradient-to-br from-emerald-500 to-teal-500', onClick: () => navigate('/blogs') }
+    { icon: FileText, title: 'Blog Posts', description: 'Manage blog content', color: 'bg-gradient-to-br from-violet-500 to-fuchsia-500', onClick: () => navigate('/blogs') }
   ];
 
   if (loading) {

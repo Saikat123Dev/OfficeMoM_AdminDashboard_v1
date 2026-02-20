@@ -4,7 +4,7 @@ import {
     ArrowLeft, User, Mail, Check, X, Shield, Clock, CreditCard,
     Mic, Calendar, Activity, Eye, Headphones, Globe, Smartphone,
     TrendingUp, TrendingDown, DollarSign, ChevronRight, FileText,
-    RefreshCw, Zap, Download, ExternalLink
+    RefreshCw, Zap, Download, ExternalLink, MessageSquare
 } from 'lucide-react';
 import { usersService } from '../services/api';
 
@@ -15,6 +15,12 @@ const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-US', { year: 'nume
 const fmtCurrency = (amt, curr = 'USD') => {
     if (amt == null) return '—';
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: curr }).format(amt / 100);
+};
+const fmtChannel = (row) => {
+    const channelName = typeof row?.channel_name === 'string' ? row.channel_name.trim() : '';
+    if (channelName) return channelName;
+    if (row?.channel_id != null) return `Channel #${row.channel_id}`;
+    return '—';
 };
 const timeAgo = (dateStr) => {
     if (!dateStr) return '—';
@@ -90,7 +96,7 @@ const EmptyState = ({ icon: Icon, title, description }) => (
 
 /* ========== Data Tables ========== */
 
-const DataTable = ({ columns, data, emptyIcon, emptyTitle, emptyDesc }) => {
+const DataTable = ({ columns, data, emptyIcon, emptyTitle, emptyDesc, onRowClick, getRowClassName }) => {
     if (!data || data.length === 0) {
         return <EmptyState icon={emptyIcon || Activity} title={emptyTitle || 'No data'} description={emptyDesc || 'No records found.'} />;
     }
@@ -105,15 +111,31 @@ const DataTable = ({ columns, data, emptyIcon, emptyTitle, emptyDesc }) => {
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                    {data.map((row, i) => (
-                        <tr key={row.id || i} className="hover:bg-slate-800/20 transition-colors">
+                    {data.map((row, i) => {
+                        const interactive = typeof onRowClick === 'function';
+                        const extraClass = typeof getRowClassName === 'function' ? getRowClassName(row) : '';
+                        return (
+                        <tr
+                            key={row.id || i}
+                            className={`hover:bg-slate-800/20 transition-colors ${interactive ? 'cursor-pointer' : ''} ${extraClass}`.trim()}
+                            onClick={interactive ? () => onRowClick(row) : undefined}
+                            onKeyDown={interactive ? (e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    onRowClick(row);
+                                }
+                            } : undefined}
+                            role={interactive ? 'button' : undefined}
+                            tabIndex={interactive ? 0 : undefined}
+                        >
                             {columns.map((col, j) => (
                                 <td key={j} className="px-4 py-3 text-sm text-slate-300 whitespace-nowrap">
                                     {col.render ? col.render(row) : row[col.key]}
                                 </td>
                             ))}
                         </tr>
-                    ))}
+                        );
+                    })}
                 </tbody>
             </table>
         </div>
@@ -128,6 +150,7 @@ const TABS = [
     { key: 'minutes', label: 'Minutes & Usage', icon: Clock },
     { key: 'payments', label: 'Payments', icon: CreditCard },
     { key: 'sessions', label: 'Sessions', icon: Globe },
+    { key: 'channels', label: 'Channels', icon: MessageSquare },
     { key: 'audio', label: 'Audio Files', icon: Headphones },
 ];
 
@@ -179,18 +202,24 @@ const OverviewTab = ({ subscription, usageSummary, meetings, payments }) => (
                 <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Recent Meetings</h3>
                 {meetings?.length > 0 ? (
                     <div className="space-y-2">
-                        {meetings.slice(0, 5).map((m) => (
-                            <div key={m.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/20 hover:bg-slate-700/20 transition-colors">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <Calendar className="h-4 w-4 text-indigo-400 flex-shrink-0" />
-                                    <div className="min-w-0">
-                                        <p className="text-sm text-white truncate">{m.title || 'Untitled Meeting'}</p>
-                                        <p className="text-xs text-slate-500">{fmtDate(m.date || m.created_at)}</p>
+                        {meetings.slice(0, 5).map((m) => {
+                            const channelLabel = fmtChannel(m);
+                            return (
+                                <div key={m.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/20 hover:bg-slate-700/20 transition-colors">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <Calendar className="h-4 w-4 text-indigo-400 flex-shrink-0" />
+                                        <div className="min-w-0">
+                                            <p className="text-sm text-white truncate">{m.title || 'Untitled Meeting'}</p>
+                                            <p className="text-xs text-slate-500">
+                                                {fmtDate(m.date || m.created_at)}
+                                                {channelLabel !== '—' ? ` • ${channelLabel}` : ''}
+                                            </p>
+                                        </div>
                                     </div>
+                                    <SourceBadge source={m.source} />
                                 </div>
-                                <SourceBadge source={m.source} />
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 ) : (
                     <p className="text-sm text-slate-500 italic py-4 text-center">No meetings yet</p>
@@ -238,9 +267,10 @@ const UsageStat = ({ label, value, color }) => (
 
 /* ========== Tab Content: Meetings ========== */
 
-const MeetingsTab = ({ meetings }) => {
+const MeetingsTab = ({ meetings, channelFilter }) => {
     const columns = [
         { header: 'Title', render: (r) => <span className="text-white font-medium">{r.title || 'Untitled'}</span> },
+        { header: 'Channel', render: (r) => <span className="text-slate-300">{fmtChannel(r)}</span> },
         { header: 'Source', render: (r) => <SourceBadge source={r.source} /> },
         { header: 'Date', render: (r) => fmtDate(r.date || r.created_at) },
         { header: 'Status', render: (r) => <StatusBadge status={r.processing_status} /> },
@@ -261,7 +291,12 @@ const MeetingsTab = ({ meetings }) => {
             )
         },
     ];
-    return <DataTable columns={columns} data={meetings} emptyIcon={Calendar} emptyTitle="No meetings" emptyDesc="This user hasn't had any meetings yet." />;
+    const selectedLabel = channelFilter?.name || (channelFilter?.id != null ? `Channel #${channelFilter.id}` : null);
+    const emptyDesc = selectedLabel
+        ? `No history found for ${selectedLabel}.`
+        : "This user hasn't had any meetings yet.";
+
+    return <DataTable columns={columns} data={meetings} emptyIcon={Calendar} emptyTitle="No meetings" emptyDesc={emptyDesc} />;
 };
 
 /* ========== Tab Content: Minutes & Usage ========== */
@@ -406,6 +441,41 @@ const SessionsTab = ({ sessions }) => {
     return <DataTable columns={columns} data={sessions} emptyIcon={Globe} emptyTitle="No sessions" emptyDesc="No session records found for this user." />;
 };
 
+/* ========== Tab Content: Channels ========== */
+
+const ChannelsTab = ({ channels, selectedChannelId, onSelectChannel, meetingCountsByChannel }) => {
+    const columns = [
+        {
+            header: 'Channel Name',
+            render: (r) => (
+                <div className="flex items-center gap-2">
+                    <span className="text-white font-medium">{r.name || 'Unnamed Channel'}</span>
+                    {selectedChannelId != null && String(r.id) === String(selectedChannelId) && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">selected</span>
+                    )}
+                </div>
+            )
+        },
+        {
+            header: 'History',
+            render: (r) => <span className="text-cyan-400 font-medium">{meetingCountsByChannel?.[String(r.id)] || 0} items</span>
+        },
+        { header: 'Created', render: (r) => fmtDateTime(r.created_at) },
+        { header: 'Updated', render: (r) => fmtDateTime(r.updated_at) },
+    ];
+    return (
+        <DataTable
+            columns={columns}
+            data={channels}
+            emptyIcon={MessageSquare}
+            emptyTitle="No channels"
+            emptyDesc="This user has no active channels."
+            onRowClick={onSelectChannel}
+            getRowClassName={(row) => (selectedChannelId != null && String(row.id) === String(selectedChannelId) ? 'bg-indigo-500/10' : '')}
+        />
+    );
+};
+
 /* ========== Tab Content: Audio ========== */
 
 const AudioTab = ({ audios }) => {
@@ -433,8 +503,10 @@ export default function UserDetail() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [activeTab, setActiveTab] = useState('overview');
+    const [selectedChannelFilter, setSelectedChannelFilter] = useState(null);
 
     useEffect(() => {
+        setSelectedChannelFilter(null);
         loadUserDetails();
     }, [id]);
 
@@ -481,7 +553,33 @@ export default function UserDetail() {
         );
     }
 
-    const { user, subscription, usageSummary, minutesLog, minutesTransactions, meetings, payments, recharges, sessions, audios } = data;
+    const {
+        user,
+        subscription,
+        usageSummary,
+        minutesLog,
+        minutesTransactions,
+        meetings,
+        payments,
+        recharges,
+        sessions,
+        audios,
+        channels = [],
+        channelSummary = {}
+    } = data;
+    const activeChannels = Array.isArray(channels) ? channels : [];
+    const allMeetings = Array.isArray(meetings) ? meetings : [];
+    const filteredMeetings = selectedChannelFilter?.id == null
+        ? allMeetings
+        : allMeetings.filter((meeting) => String(meeting?.channel_id ?? '') === String(selectedChannelFilter.id));
+    const meetingCountsByChannel = allMeetings.reduce((acc, meeting) => {
+        if (meeting?.channel_id == null) return acc;
+        const key = String(meeting.channel_id);
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+    const channelsTotal = Number(channelSummary.totalChannels ?? activeChannels.length);
+    const channelsDeleted = Number(channelSummary.deletedChannels ?? 0);
     const isGoogleUser = user.isGoogleUser === true || user.isGoogleUser === 1 || user.isGoogleUser === '1';
     const isFacebookUser = user.isFacebookUser === true || user.isFacebookUser === 1 || user.isFacebookUser === '1';
 
@@ -543,7 +641,7 @@ export default function UserDetail() {
             </div>
 
             {/* Summary Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <MiniStat
                     icon={CreditCard}
                     title="Plan"
@@ -561,8 +659,8 @@ export default function UserDetail() {
                 <MiniStat
                     icon={Calendar}
                     title="Meetings"
-                    value={meetings?.length || 0}
-                    subtext={meetings?.length > 0 ? `Last: ${timeAgo(meetings[0]?.created_at)}` : 'None yet'}
+                    value={allMeetings.length}
+                    subtext={allMeetings.length > 0 ? `Last: ${timeAgo(allMeetings[0]?.created_at)}` : 'None yet'}
                     color="bg-gradient-to-br from-emerald-500 to-emerald-600"
                 />
                 <MiniStat
@@ -571,6 +669,13 @@ export default function UserDetail() {
                     value={payments?.length || 0}
                     subtext={recharges?.length > 0 ? `${recharges.length} recharges` : 'No recharges'}
                     color="bg-gradient-to-br from-amber-500 to-amber-600"
+                />
+                <MiniStat
+                    icon={MessageSquare}
+                    title="Channels"
+                    value={activeChannels.length}
+                    subtext={channelsDeleted > 0 ? `${channelsDeleted} deleted (${channelsTotal} total)` : `${channelsTotal} total`}
+                    color="bg-gradient-to-br from-cyan-500 to-cyan-600"
                 />
             </div>
 
@@ -597,18 +702,35 @@ export default function UserDetail() {
             {/* Tab Content */}
             <div className="animate-fade-in">
                 {activeTab === 'overview' && (
-                    <OverviewTab subscription={subscription} usageSummary={usageSummary} meetings={meetings} payments={payments} />
+                    <OverviewTab subscription={subscription} usageSummary={usageSummary} meetings={allMeetings} payments={payments} />
                 )}
                 {activeTab === 'meetings' && (
                     <div className="card-dark overflow-hidden">
                         <div className="px-5 py-4 border-b border-slate-700/50">
-                            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                                <Calendar className="h-4 w-4 text-indigo-400" />
-                                Meeting & MoM History
-                                <span className="text-xs text-slate-500 ml-auto">{meetings?.length || 0} records</span>
-                            </h3>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                                    <Calendar className="h-4 w-4 text-indigo-400" />
+                                    Meeting & MoM History
+                                </h3>
+                                {selectedChannelFilter?.id != null && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                        Channel: {selectedChannelFilter?.name || `Channel #${selectedChannelFilter.id}`}
+                                    </span>
+                                )}
+                                {selectedChannelFilter?.id != null && (
+                                    <button
+                                        onClick={() => setSelectedChannelFilter(null)}
+                                        className="text-xs px-2 py-1 rounded-md bg-slate-700/50 text-slate-300 hover:bg-slate-700"
+                                    >
+                                        Clear filter
+                                    </button>
+                                )}
+                                <span className="text-xs text-slate-500 ml-auto">
+                                    {filteredMeetings.length} records
+                                </span>
+                            </div>
                         </div>
-                        <MeetingsTab meetings={meetings} />
+                        <MeetingsTab meetings={filteredMeetings} channelFilter={selectedChannelFilter} />
                     </div>
                 )}
                 {activeTab === 'minutes' && (
@@ -627,6 +749,29 @@ export default function UserDetail() {
                             </h3>
                         </div>
                         <SessionsTab sessions={sessions} />
+                    </div>
+                )}
+                {activeTab === 'channels' && (
+                    <div className="card-dark overflow-hidden">
+                        <div className="px-5 py-4 border-b border-slate-700/50">
+                            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                                <MessageSquare className="h-4 w-4 text-indigo-400" />
+                                User Channels
+                                <span className="text-xs text-slate-500 ml-auto">{activeChannels.length} channels</span>
+                            </h3>
+                        </div>
+                        <ChannelsTab
+                            channels={activeChannels}
+                            selectedChannelId={selectedChannelFilter?.id ?? null}
+                            meetingCountsByChannel={meetingCountsByChannel}
+                            onSelectChannel={(channel) => {
+                                setSelectedChannelFilter({
+                                    id: channel.id,
+                                    name: channel.name || `Channel #${channel.id}`
+                                });
+                                setActiveTab('meetings');
+                            }}
+                        />
                     </div>
                 )}
                 {activeTab === 'audio' && (

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import Sidebar from './Sidebar';
 import TopNav from './TopNav';
+import { useDatabaseMode } from '../context/DatabaseModeContext';
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { dbMode } = useDatabaseMode();
 
   return (
     <div className="flex h-screen bg-slate-950">
@@ -15,7 +17,10 @@ export default function Layout({ children }) {
         <TopNav onMenuClick={() => setSidebarOpen(true)} />
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+        <main
+          key={`layout-main-${dbMode}`}
+          className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950"
+        >
           <div className="p-4 md:p-6 lg:p-8">
             {children}
           </div>

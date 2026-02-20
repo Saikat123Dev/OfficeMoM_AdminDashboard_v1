@@ -51,7 +51,7 @@ async function getUserDetails(req, res) {
         const user = users[0];
 
         // 2. Subscription details
-        const [subscriptions] = await pool.execute(
+        const subscriptions = await safeQuery(
             `SELECT id, stripe_customer_id, stripe_subscription_id,
                     subscription_plan, billing_cycle, stripe_price_id,
                     subscription_limit, subscription_remaining, subscription_used,
@@ -64,7 +64,7 @@ async function getUserDetails(req, res) {
         );
 
         // 3. Minutes usage summary
-        const [usageSummary] = await pool.execute(
+        const usageSummaryRows = await safeQuery(
             `SELECT 
                 COUNT(*) as total_actions,
                 COALESCE(SUM(CASE WHEN action = 'deducted' THEN minutes_used ELSE 0 END), 0) as total_deducted,
@@ -76,7 +76,7 @@ async function getUserDetails(req, res) {
         );
 
         // 4. Recent minutes usage log (last 50)
-        const [minutesLog] = await pool.execute(
+        const minutesLog = await safeQuery(
             `SELECT id, audio_id, minutes_used, source, action, created_at, reason
              FROM minutes_usage_log WHERE user_id = ?
              ORDER BY created_at DESC LIMIT 50`,
@@ -84,26 +84,29 @@ async function getUserDetails(req, res) {
         );
 
         // 5. Minutes transactions (last 50)
-        const [minutesTransactions] = await pool.execute(
+        const minutesTransactions = await safeQuery(
             `SELECT id, amount, type, description, balance_after, created_at
              FROM minutes_transactions WHERE user_id = ?
              ORDER BY created_at DESC LIMIT 50`,
             [userId]
         );
 
-        // 6. Meeting/MoM history (last 50)
-        const [meetings] = await pool.execute(
-            `SELECT id, meeting_id, room_id, source, title, 
-                    isMoMGenerated, date, processing_status,
-                    deducted_minutes, minutes_refunded, refunded_minutes,
-                    summary, created_at
-             FROM history WHERE user_id = ?
-             ORDER BY created_at DESC LIMIT 50`,
+        // 6. Meeting/MoM history (latest first)
+        const meetings = await safeQuery(
+            `SELECT h.id, h.meeting_id, h.room_id, h.channel_id, h.source, h.title,
+                    c.name AS channel_name,
+                    h.isMoMGenerated, h.date, h.processing_status,
+                    h.deducted_minutes, h.minutes_refunded, h.refunded_minutes,
+                    h.summary, h.created_at
+             FROM history h
+             LEFT JOIN channels c ON c.id = h.channel_id AND c.user_id = h.user_id
+             WHERE h.user_id = ?
+             ORDER BY h.created_at DESC`,
             [userId]
         );
 
         // 7. Payment history (last 50)
-        const [payments] = await pool.execute(
+        const payments = await safeQuery(
             `SELECT id, amount, currency, payment_status, payment_type,
                     plan_name, billing_cycle, minutes_purchased,
                     invoice_pdf, receipt_url, invoice_number,
@@ -114,7 +117,7 @@ async function getUserDetails(req, res) {
         );
 
         // 8. Recharge transactions (last 30)
-        const [recharges] = await pool.execute(
+        const recharges = await safeQuery(
             `SELECT id, amount, minutes, rate, status, created_at
              FROM recharge_transactions WHERE user_id = ?
              ORDER BY created_at DESC LIMIT 30`,
@@ -122,7 +125,7 @@ async function getUserDetails(req, res) {
         );
 
         // 9. Active sessions (last 20)
-        const [sessions] = await pool.execute(
+        const sessions = await safeQuery(
             `SELECT id, device_info, ip_address, user_agent,
                     created_at, last_activity, expires_at, is_active
              FROM user_sessions WHERE user_id = ?
@@ -131,25 +134,62 @@ async function getUserDetails(req, res) {
         );
 
         // 10. Audio files (last 30)
-        const [audios] = await pool.execute(
+        const audios = await safeQuery(
             `SELECT id, title, audioUrl, source, uploadedAt
              FROM user_audios WHERE userId = ?
              ORDER BY uploadedAt DESC LIMIT 30`,
             [userId]
         );
 
+        // 11. User channels
+        const channels = await safeQuery(
+            `SELECT id, name, created_at, updated_at, deleted_at
+             FROM channels
+             WHERE user_id = ?
+             ORDER BY created_at DESC`,
+            [userId]
+        );
+
+        const activeChannels = channels
+            .filter((channel) => {
+                if (!channel.deleted_at) return true;
+                return String(channel.deleted_at).startsWith('0000-00-00');
+            })
+            .map((channel) => ({
+                id: channel.id,
+                name: channel.name,
+                created_at: channel.created_at,
+                updated_at: channel.updated_at
+            }));
+
+        const channelSummary = {
+            totalChannels: channels.length,
+            activeChannels: activeChannels.length,
+            deletedChannels: Math.max(0, channels.length - activeChannels.length)
+        };
+
+        const usageSummary = usageSummaryRows[0] || {
+            total_actions: 0,
+            total_deducted: 0,
+            total_refunded: 0,
+            total_bonus: 0,
+            total_purchased: 0
+        };
+
         res.json({
             success: true,
             user,
             subscription: subscriptions[0] || null,
-            usageSummary: usageSummary[0],
+            usageSummary,
             minutesLog,
             minutesTransactions,
             meetings,
             payments,
             recharges,
             sessions,
-            audios
+            audios,
+            channels: activeChannels,
+            channelSummary
         });
 
     } catch (error) {
@@ -173,25 +213,25 @@ async function getDashboardStats(req, res) {
              FROM users`
         );
 
-        const [meetingCounts] = await pool.execute(
+        const meetingCounts = await safeQuery(
             `SELECT COUNT(*) as totalMeetings FROM history`
         );
 
-        const [paymentStats] = await pool.execute(
+        const paymentStats = await safeQuery(
             `SELECT 
                 COUNT(*) as totalPayments,
                 COALESCE(SUM(CASE WHEN payment_status = 'succeeded' THEN amount ELSE 0 END), 0) as totalRevenue
              FROM stripe_payments`
         );
 
-        const [minuteStats] = await pool.execute(
+        const minuteStats = await safeQuery(
             `SELECT 
                 COALESCE(SUM(CASE WHEN action = 'deducted' THEN minutes_used ELSE 0 END), 0) as totalMinutesUsed,
                 COALESCE(SUM(CASE WHEN action = 'purchase' THEN minutes_used ELSE 0 END), 0) as totalMinutesPurchased
              FROM minutes_usage_log`
         );
 
-        const [activeSubs] = await pool.execute(
+        const activeSubs = await safeQuery(
             `SELECT COUNT(*) as activeSubscriptions FROM user_subscription_details WHERE status = 'active'`
         );
 
@@ -207,10 +247,12 @@ async function getDashboardStats(req, res) {
             success: true,
             stats: {
                 ...userCounts[0],
-                ...meetingCounts[0],
-                ...paymentStats[0],
-                ...minuteStats[0],
-                ...activeSubs[0],
+                totalMeetings: meetingCounts[0]?.totalMeetings ?? 0,
+                totalPayments: paymentStats[0]?.totalPayments ?? 0,
+                totalRevenue: paymentStats[0]?.totalRevenue ?? 0,
+                totalMinutesUsed: minuteStats[0]?.totalMinutesUsed ?? 0,
+                totalMinutesPurchased: minuteStats[0]?.totalMinutesPurchased ?? 0,
+                activeSubscriptions: activeSubs[0]?.activeSubscriptions ?? 0,
                 totalFaqs: faqCounts[0]?.totalFaqs ?? null,
                 totalPlans: planCounts[0]?.totalPlans ?? null
             }
@@ -227,12 +269,12 @@ async function getDashboardStats(req, res) {
  */
 async function getRecentActivity(req, res) {
     try {
-        const [recentUsers] = await pool.execute(
+        const recentUsers = await safeQuery(
             `SELECT id, fullName, email, profilePic, isVerified, isGoogleUser, isFacebookUser, created_at
              FROM users ORDER BY created_at DESC LIMIT 10`
         );
 
-        const [recentMeetings] = await pool.execute(
+        const recentMeetings = await safeQuery(
             `SELECT h.id, h.title, h.source, h.date, h.processing_status, h.isMoMGenerated,
                     h.deducted_minutes, h.created_at, u.fullName as userName, u.email as userEmail
              FROM history h
@@ -240,7 +282,7 @@ async function getRecentActivity(req, res) {
              ORDER BY h.created_at DESC LIMIT 10`
         );
 
-        const [recentPayments] = await pool.execute(
+        const recentPayments = await safeQuery(
             `SELECT sp.id, sp.amount, sp.currency, sp.payment_status, sp.payment_type,
                     sp.plan_name, sp.minutes_purchased, sp.created_at, sp.paid_at,
                     u.fullName as userName, u.email as userEmail
