@@ -18,9 +18,6 @@ const blogsRoutes = require('./routes/blogs');
 const uploadRoutes = require('./routes/upload');
 const errorHandler = require('./middleware/errorHandler');
 
-// Middleware
-
-
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
