@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useDatabaseMode } from '../context/DatabaseModeContext';
 import { useNavigate } from 'react-router-dom';
 import { usersService } from '../services/api';
 import {
@@ -31,6 +32,7 @@ const timeAgo = (dateStr) => {
 
 export default function TopNav({ onMenuClick }) {
   const { user, logout } = useAuth();
+  const { dbMode, setDbMode, dbTargets } = useDatabaseMode();
   const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -114,6 +116,15 @@ export default function TopNav({ onMenuClick }) {
     }
   };
 
+  const handleDbModeChange = useCallback(async (nextMode) => {
+    if (nextMode === dbMode) return;
+
+    setDbMode(nextMode);
+    setShowDropdown(false);
+    setShowNotifications(false);
+    await fetchNotifications({ silent: true });
+  }, [dbMode, fetchNotifications, setDbMode]);
+
   const userInitials = user?.name
     ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : 'AD';
@@ -145,6 +156,29 @@ export default function TopNav({ onMenuClick }) {
 
         {/* Right side */}
         <div className="flex items-center space-x-2">
+          <div className="hidden md:flex items-center rounded-xl border border-slate-700/50 bg-slate-800/40 p-1">
+            <button
+              onClick={() => handleDbModeChange(dbTargets.PRODUCTION)}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
+                dbMode === dbTargets.PRODUCTION
+                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                  : 'bg-transparent text-slate-300 border-transparent hover:text-white hover:bg-slate-700/40'
+              }`}
+            >
+              Production Database
+            </button>
+            <button
+              onClick={() => handleDbModeChange(dbTargets.TEST)}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${
+                dbMode === dbTargets.TEST
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-transparent text-slate-300 border-transparent hover:text-white hover:bg-slate-700/40'
+              }`}
+            >
+              Test Database
+            </button>
+          </div>
+
           {/* Notifications */}
           <div className="relative" ref={notifRef}>
             <button

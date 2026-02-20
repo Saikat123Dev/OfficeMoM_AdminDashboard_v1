@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useDatabaseMode } from '../context/DatabaseModeContext';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Shield, Building2, Users, CreditCard, HelpCircle } from 'lucide-react';
 
@@ -12,6 +13,7 @@ export default function Login() {
   const [activeFeature, setActiveFeature] = useState(0);
 
   const { login } = useAuth();
+  const { dbMode, setDbMode, dbTargets } = useDatabaseMode();
   const navigate = useNavigate();
 
   const features = [
@@ -141,6 +143,35 @@ export default function Login() {
                     className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition-colors"
                   >
                     {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Database Mode */}
+              <div className="rounded-xl border border-slate-700/40 bg-slate-900/40 p-3">
+                <p className="text-xs font-medium text-slate-400 mb-2">Database Mode</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDbMode(dbTargets.PRODUCTION)}
+                    className={`px-2.5 py-2 rounded-lg text-[11px] font-medium transition-colors border ${
+                      dbMode === dbTargets.PRODUCTION
+                        ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                        : 'bg-transparent text-slate-300 border-slate-700/50 hover:text-white hover:bg-slate-800/60'
+                    }`}
+                  >
+                    Production Database
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDbMode(dbTargets.TEST)}
+                    className={`px-2.5 py-2 rounded-lg text-[11px] font-medium transition-colors border ${
+                      dbMode === dbTargets.TEST
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        : 'bg-transparent text-slate-300 border-slate-700/50 hover:text-white hover:bg-slate-800/60'
+                    }`}
+                  >
+                    Test Database
                   </button>
                 </div>
               </div>

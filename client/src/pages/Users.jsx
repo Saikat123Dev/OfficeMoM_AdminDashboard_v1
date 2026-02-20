@@ -25,6 +25,53 @@ const SocialBadge = ({ isGoogle, isFacebook }) => {
   return <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-slate-700/50 text-slate-400 border border-slate-600/30">Email</span>;
 };
 
+const formatLabel = (value = '') =>
+  String(value)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const SubscriptionStatusBadge = ({ status }) => {
+  const normalized = String(status || '').toLowerCase();
+  const classes =
+    normalized === 'active'
+      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
+      : normalized === 'trialing'
+        ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20'
+        : normalized === 'canceled' || normalized === 'cancelled'
+          ? 'bg-red-500/15 text-red-400 border-red-500/20'
+          : 'bg-slate-700/50 text-slate-400 border-slate-600/30';
+
+  return (
+    <span className={`inline-flex items-center px-2 py-1 rounded-full text-[11px] font-medium border ${classes}`}>
+      {normalized ? formatLabel(normalized) : 'Unknown'}
+    </span>
+  );
+};
+
+const SubscriptionCell = ({ plan, cycle, status }) => {
+  if (!plan) {
+    return (
+      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-slate-700/50 text-slate-400 border border-slate-600/30">
+        No Subscription
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="text-sm font-medium text-white">{formatLabel(plan)}</div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {cycle ? (
+          <span className="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20">
+            {formatLabel(cycle)}
+          </span>
+        ) : null}
+        <SubscriptionStatusBadge status={status} />
+      </div>
+    </div>
+  );
+};
+
 /* ========== Main Component ========== */
 
 export default function Users() {
@@ -176,6 +223,7 @@ export default function Users() {
                   <tr className="border-b border-slate-700/50">
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">User</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Subscription</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Registration</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Actions</th>
                   </tr>
@@ -210,6 +258,13 @@ export default function Users() {
                           <VerificationBadge verified={user.isVerified} />
                           <SocialBadge isGoogle={user.isGoogleUser} isFacebook={user.isFacebookUser} />
                         </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <SubscriptionCell
+                          plan={user.subscription_plan}
+                          cycle={user.subscription_billing_cycle}
+                          status={user.subscription_status}
+                        />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                         {new Date(user.created_at).toLocaleDateString()}

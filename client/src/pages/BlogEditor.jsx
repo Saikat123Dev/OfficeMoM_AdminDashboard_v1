@@ -8,6 +8,7 @@ import {
     Upload, Tag, FileText, Eye, Loader2, Check, Clock3, Type, ScanText, Trash2
 } from 'lucide-react';
 import { blogService, uploadService } from '../services/api';
+import { useDatabaseMode } from '../context/DatabaseModeContext';
 
 /* ─── Register custom Quill Blots so Quill can persist elements it does not
  *     support natively (horizontal rules and full HTML tables). ──────────── */
@@ -370,6 +371,7 @@ export default function BlogEditor() {
     const { id } = useParams();
     const isEditing = Boolean(id);
     const navigate = useNavigate();
+    const { dbMode, dbTargets } = useDatabaseMode();
 
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
@@ -384,6 +386,7 @@ export default function BlogEditor() {
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [publishing, setPublishing] = useState(false);
+    const [savingToProduction, setSavingToProduction] = useState(false);
     const [uploadingImage, setUploadingImage] = useState(false);
     const [uploadingEditorImage, setUploadingEditorImage] = useState(false);
     const [dragActive, setDragActive] = useState(false);
@@ -405,14 +408,14 @@ export default function BlogEditor() {
         const handleShortcutSave = (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
                 e.preventDefault();
-                if (!saving && !publishing) {
+                if (!saving && !publishing && !savingToProduction) {
                     handleSave('draft');
                 }
             }
         };
         window.addEventListener('keydown', handleShortcutSave);
         return () => window.removeEventListener('keydown', handleShortcutSave);
-    }, [saving, publishing, title, content, excerpt, metaDescription, featuredImage, selectedTags, status, id]);
+    }, [saving, publishing, savingToProduction, title, content, excerpt, metaDescription, featuredImage, selectedTags, status, id]);
 
     const loadBlog = async () => {
         try {
@@ -918,40 +921,47 @@ export default function BlogEditor() {
         setDragActive(false);
     };
 
-    const handleSave = async (publishStatus = null) => {
-        if (!title.trim()) { setError('Title is required'); return; }
-        if (!content.trim() || content === '<p><br></p>') { setError('Content is required'); return; }
+    const buildSavePayload = useCallback(async (finalStatus) => {
+        if (!title.trim()) {
+            throw new Error('Title is required');
+        }
+        if (!content.trim() || content === '<p><br></p>') {
+            throw new Error('Content is required');
+        }
 
+        let finalContent = content;
+        if (contentLooksLikeRawMarkdown(finalContent)) {
+            finalContent = convertStoredMarkdownToHtml(finalContent);
+            setContent(finalContent);
+        }
+        if (finalContent.includes('data:image/')) {
+            finalContent = await replaceEmbeddedImagesWithUploads(finalContent);
+            setContent(finalContent);
+        }
+
+        finalContent = cleanContentForSave(finalContent);
+
+        return {
+            title: title.trim(),
+            content: finalContent,
+            excerpt: excerpt.trim(),
+            featured_image: featuredImage,
+            status: finalStatus,
+            meta_description: metaDescription.trim(),
+            tags: selectedTags
+        };
+    }, [title, content, excerpt, featuredImage, metaDescription, selectedTags, replaceEmbeddedImagesWithUploads]);
+
+    const handleSave = async (publishStatus = null) => {
         const finalStatus = publishStatus || status;
-        const isPublishing = finalStatus === 'published';
+        const isPublishingAction = finalStatus === 'published';
 
         try {
-            if (isPublishing) setPublishing(true);
+            if (isPublishingAction) setPublishing(true);
             else setSaving(true);
             setError('');
 
-            let finalContent = content;
-            if (contentLooksLikeRawMarkdown(finalContent)) {
-                finalContent = convertStoredMarkdownToHtml(finalContent);
-                setContent(finalContent);
-            }
-            if (finalContent.includes('data:image/')) {
-                finalContent = await replaceEmbeddedImagesWithUploads(finalContent);
-                setContent(finalContent);
-            }
-
-            // Strip editor-only wrappers so stored HTML is portable
-            finalContent = cleanContentForSave(finalContent);
-
-            const payload = {
-                title: title.trim(),
-                content: finalContent,
-                excerpt: excerpt.trim(),
-                featured_image: featuredImage,
-                status: finalStatus,
-                meta_description: metaDescription.trim(),
-                tags: selectedTags
-            };
+            const payload = await buildSavePayload(finalStatus);
 
             let res;
             if (isEditing) {
@@ -961,17 +971,45 @@ export default function BlogEditor() {
             }
 
             setStatus(finalStatus);
-            showSaveMessage(isPublishing ? '✅ Published!' : '✅ Saved!');
+            showSaveMessage(isPublishingAction ? '✅ Published!' : '✅ Saved!');
 
             if (!isEditing && res.data.blog?.id) {
                 navigate(`/blogs/edit/${res.data.blog.id}`, { replace: true });
             }
         } catch (err) {
-            setError(err.response?.data?.error || 'Failed to save');
+            setError(err.response?.data?.error || err.message || 'Failed to save');
             console.error(err);
         } finally {
             setSaving(false);
             setPublishing(false);
+        }
+    };
+
+    const handleSaveToProduction = async () => {
+        if (!isEditing || dbMode !== dbTargets.TEST) return;
+
+        try {
+            setSavingToProduction(true);
+            setError('');
+
+            const payload = await buildSavePayload('draft');
+
+            try {
+                await blogService.updateBlog(id, payload, { dbTarget: dbTargets.PRODUCTION });
+            } catch (err) {
+                if (err.response?.status === 404) {
+                    await blogService.createBlog(payload, { dbTarget: dbTargets.PRODUCTION });
+                } else {
+                    throw err;
+                }
+            }
+
+            showSaveMessage('✅ Saved to production DB');
+        } catch (err) {
+            setError(err.response?.data?.error || err.message || 'Failed to save to production DB');
+            console.error(err);
+        } finally {
+            setSavingToProduction(false);
         }
     };
 
@@ -1053,16 +1091,27 @@ export default function BlogEditor() {
 
                     <button
                         onClick={() => handleSave('draft')}
-                        disabled={saving}
+                        disabled={saving || publishing || savingToProduction}
                         className="flex items-center px-4 py-2 bg-slate-800/50 border border-slate-600/50 rounded-xl text-slate-300 hover:text-white hover:bg-slate-700/50 text-sm font-medium transition-colors disabled:opacity-50"
                     >
                         {saving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Save className="h-4 w-4 mr-1.5" />}
                         Save Draft
                     </button>
 
+                    {isEditing && dbMode === dbTargets.TEST && (
+                        <button
+                            onClick={handleSaveToProduction}
+                            disabled={savingToProduction || saving || publishing}
+                            className="flex items-center px-4 py-2 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 hover:text-rose-200 hover:bg-rose-500/20 text-sm font-medium transition-colors disabled:opacity-50"
+                        >
+                            {savingToProduction ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Globe className="h-4 w-4 mr-1.5" />}
+                            Save to Production DB
+                        </button>
+                    )}
+
                     <button
                         onClick={() => handleSave('published')}
-                        disabled={publishing}
+                        disabled={publishing || saving || savingToProduction}
                         className="btn-gradient flex items-center text-sm disabled:opacity-50"
                     >
                         {publishing ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Globe className="h-4 w-4 mr-1.5" />}
